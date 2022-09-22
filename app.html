@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <script src="pkg/calculator_2.js"></script>
+        <script>
+wasm_bindgen("pkg/calculator_2_bg.wasm");
+
+const Rust = {
+    /** Evaluates an array of expressions, and returns their values
+     * @param {Array} array of expressions
+     * @returns {Array} array of values
+     */
+    eval: function eval(array) {
+        return JSON.parse(wasm_bindgen.eval(JSON.stringify(array)));
+    }
+};        </script>
+        <style>
+body {
+    padding: 0;
+    margin: 0;
+    display: flex;
+    height: 100vh;
+}
+main {
+    flex-grow: 1;
+
+    display: flex;
+    flex-direction: row;
+}
+.sidebar {
+    width: 400px;
+    border-right: 1px solid hsl(0, 0%, 50%);
+}
+.toolbar {
+    background: hsl(0, 0%, 87.5%);
+    padding: 8px;
+}
+.toolbar button {
+    border: 0;
+    background: hsl(0, 0%, 87.5%);
+    border-radius: 24px;
+    font-size: 24px;
+    cursor: pointer;
+
+    width: 32px;
+    height: 32px;
+    line-height: 32px;
+    text-align: center;
+}
+.toolbar button:active {
+    filter:brightness(75%);
+}
+.line {
+    padding: 8px 16px;
+    border-bottom: 1px solid hsl(0, 0%, 75%);
+}
+.line-input {
+    padding: 0;
+}
+.line br {
+    display: none;
+}
+.line-text {
+    font-size: 13px;
+    font-family: sans-serif;
+    text-align: right;
+    color: #777; }
+.line-input:focus {
+    outline: none; }
+.line-text:not(:empty) {
+    padding-top: 8px; }
+.line-text.error {
+    color: #e44; }
+.line.focus {
+    outline: 2px solid hsl(100, 40%, 50%);
+    border-color: transparent;
+}
+
+.matrix {
+    display: inline-block;
+    border-left: 2px solid #000;
+    border-right: 2px solid #000;
+    position: relative;
+    vertical-align: middle;
+}
+.matrix::before, .matrix::after {
+    content: " ";
+    position: absolute;
+    left: 0;
+    width: 8px;
+    height: 100%; /* backcompat*/
+    height: calc(100% - 4px);
+    border-top: 2px solid #000;
+    border-bottom: 2px solid #000;
+}
+.matrix::after {
+    left: auto;
+    right: 0;
+    top: 0;
+}
+.matrix td {
+    text-align: center;
+    height: 24px;
+    min-width: 24px;
+}
+        </style>
+    </head>
+    <body>
+        <main>
+            <div class="sidebar">
+                <div class="toolbar">
+                    <button id="add-line">+</button>
+                </div>
+                <div id="lines">
+        
+                </div>
+            </div>
+        </main>
+
+        <script>
+/**
+ * Focuses a matrix cell that is already added to the DOM tree
+ */
+function focusMatrixCell(cell) {
+    let selection = window.getSelection();
+    selection.removeAllRanges();
+    let newRange = document.createRange();
+    newRange.selectNodeContents(cell);
+    selection.addRange(newRange);            
+}
+
+function createMatrixCell() {
+    let cell = document.createElement("td");
+    cell.contentEditable = true;
+    cell.innerHTML = "0";
+    return cell;
+}
+    
+function createMatrixElement() {
+    let elem = document.createElement("table");
+    elem.classList.add("matrix");
+    let row = document.createElement("tr");
+    let cell = createMatrixCell();
+    row.appendChild(cell);
+    elem.appendChild(row);
+    return [elem, cell];
+}
+
+function handleMatrixCellKeydown(evt, cell) {
+    let matrixElem = cell.parentElement.parentElement;
+    let rowElem = cell.parentElement;
+    if (evt.code == "Tab" || (evt.code == "Space" && cell.textContent.split("(").length == cell.textContent.split(")").length)) {
+        if (!evt.shiftKey) {
+            if (cell.nextElementSibling != null) {
+                focusMatrixCell(cell.nextElementSibling);
+            } else {
+                for (let row of Array.from(matrixElem.children)) {
+                    row.appendChild(createMatrixCell());
+                }
+                focusMatrixCell(rowElem.lastElementChild);
+            }
+        } else {
+            if (cell.previousElementSibling != null) {
+                focusMatrixCell(cell.previousElementSibling);
+            }
+        }
+        evt.preventDefault();
+        return false;
+    } else if (evt.code == "Enter") {
+        let idx = Array.from(rowElem.children).indexOf(cell);
+        if (rowElem.nextElementSibling != null) {
+            focusMatrixCell(rowElem.nextElementSibling.children[idx]);
+        } else {
+            let nChildren = rowElem.children.length;
+            let newRow = document.createElement("tr");
+            for (let i =0 ; i< nChildren; i++) {
+                let cell = createMatrixCell();
+                newRow.appendChild(cell);
+            }
+            matrixElem.appendChild(newRow);
+
+            focusMatrixCell(newRow.children[idx]);
+        }
+        evt.preventDefault();
+        return false;
+    } else if (evt.code == "ArrowDown") {
+        let idx = Array.from(rowElem.children).indexOf(cell);
+        if (rowElem.nextElementSibling != null) {
+            focusMatrixCell(rowElem.nextElementSibling.children[idx]);
+        }
+        evt.preventDefault();
+        return false;
+    } else if (evt.code == "ArrowUp") {
+        let idx = Array.from(rowElem.children).indexOf(cell);
+        if (rowElem.previousElementSibling != null) {
+            focusMatrixCell(rowElem.previousElementSibling.children[idx]);
+        }
+        evt.preventDefault();
+        return false;
+    }
+}
+
+// TODO: Leaky abstractions w.r.t. parent
+const Line = {
+    _attachInputHandlers: function(inputElem) {
+        inputElem.addEventListener("input", function(evt) {
+            let selection = window.getSelection();
+            if (evt.data == "[" && selection.rangeCount == 1 && selection.getRangeAt(0).endContainer.parentElement == inputElem) {
+                let range = selection.getRangeAt(0);
+                let id = (Math.random() * Number.MAX_SAFE_INTEGER).toString(36);
+
+                let beforeText = range.endContainer.textContent.slice(0, range.endOffset-1),
+                    afterText =  range.endContainer.textContent.slice(range.endOffset+1, 0);
+                let [matrixElem, cell] = createMatrixElement();
+
+                range.endContainer.textContent = afterText;
+                range.endContainer.parentElement.insertBefore(matrixElem, range.endContainer);
+                range.endContainer.parentElement.insertBefore(document.createTextNode(beforeText), matrixElem);
+
+                focusMatrixCell(cell);         
+            }
+
+            evaluateAll();
+            saveLines();
+        });
+        inputElem.addEventListener("keydown", function(evt) {
+            let selection = window.getSelection();
+            if (selection.rangeCount == 1 && 
+                (selection.getRangeAt(0).endContainer.parentElement.parentElement.classList.contains("matrix")
+                || selection.getRangeAt(0).endContainer.parentElement.parentElement.parentElement.classList.contains("matrix"))) {
+
+                let cell = selection.getRangeAt(0).endContainer.parentElement.tagName.toLowerCase() == "tr" ? 
+                    selection.getRangeAt(0).endContainer : selection.getRangeAt(0).endContainer.parentElement;
+                console.assert(cell.tagName.toLowerCase() == "td", "cell tag is " + cell.tagName);
+
+                handleMatrixCellKeydown(evt, cell);
+            } else {
+                let lineElem = document.activeElement.parentElement;
+                if (evt.code == "Enter") {
+                    if (lineElem.nextElementSibling != null) {
+                        Line.focus(lineElem.nextElementSibling);
+                    } else {
+                        let newLine = Line.create();
+                        lineElem.parentElement.appendChild(newLine);
+                        Line.focus(newLine);
+                    }
+                    evt.preventDefault();
+                    return false;
+                } else if (evt.code == "ArrowUp") {
+                    if (lineElem.previousElementSibling != null) {
+                        Line.focus(lineElem.previousElementSibling);
+                    }
+                    evt.preventDefault();
+                    return false;
+                } else if (evt.code == "ArrowDown") {
+                    if (lineElem.nextElementSibling != null) {
+                        Line.focus(lineElem.nextElementSibling);
+                    }
+                    evt.preventDefault();
+                    return false;
+                } else if (evt.code == "Backspace") {
+                    if (this.textContent.trim() == "") {
+                        let newLine = this.parentElement.previousElementSibling;
+                        this.parentElement.remove();
+                        Line.focus(newLine);
+                        evt.preventDefault();
+                    }
+                }
+            }
+        });
+        inputElem.addEventListener("focus", function() {
+            this.parentElement.classList.add("focus");
+        });
+        inputElem.addEventListener("blur", function() {
+            this.parentElement.classList.remove("focus");
+        });
+    },
+
+    create: function() {
+        let elem = document.createElement("div");
+        elem.classList.add("line");
+        
+        let inputElem = document.createElement("div");
+        inputElem.classList.add("line-input");
+        inputElem.contentEditable = true;
+        elem.appendChild(inputElem);
+
+        let textElem = document.createElement("div");
+        textElem.className = "line-text";
+        elem.appendChild(textElem);
+
+        Line._attachInputHandlers(inputElem);
+
+        return elem;
+    },
+
+    /**
+     * Returns all line elements
+     * @returns {HTMLElement[]}
+     */
+    all: function() {
+        return Array.from(document.querySelectorAll(".line"));
+    },
+
+    /**
+     * Returns the input element of a line element
+     * @param {HTMLElement} line the line element
+     * @returns {HTMLElement} a contenteditable element
+     */
+    input: function(line) {
+        return line.querySelector(".line-input");
+    },
+
+    /**
+     * Do not use {@code line.focus()}
+     * @param {HTMLElement} line
+     */
+    focus: function(line) {
+        Line.input(line).focus()
+    },
+
+    /**
+     * @param {HTMLElement} line
+     */
+    showText: function(line, text, type) {
+        let textElem = line.querySelector(".line-text");
+        if (type == "error") {
+            textElem.classList.add("error");
+        } else {
+            textElem.classList.remove("error");
+        }
+        textElem.textContent = text;
+    },
+};
+
+/**
+ * Converts a contenteditable HTML element to text.
+ * @param {HTMLElement} el the contenteditable element
+ */
+function convertHTMLToText(el) {
+    let s = "";
+    for (let i = 0; i < el.childNodes.length; i++) {
+        let node = el.childNodes[i];
+        if (node instanceof Text) {
+            s += node.data; 
+        } else if (node instanceof HTMLTableElement && node.classList.contains("matrix")) {
+            s += "[ ";
+            for (let i = 0; i < node.rows.length; i++) {
+                let row = node.rows[i]; 
+                for (let j = 0; j < row.cells.length; j++) {
+                    let cell = row.cells[j];
+                    s += convertHTMLToText(cell)+ " ";
+                }
+                if (i != node.rows.length - 1)
+                    s += "; "
+            }
+            s += "]";
+        }
+    }
+    return s;
+}
+
+function evaluateAll() {
+    let lines = Line.all();
+
+    let indexes = [];
+    let exprs = [];
+    for (let i = 0; i < lines.length; i++) {
+        let line = lines[i];
+        let expr = convertHTMLToText(Line.input(line));
+        if (expr.trim() != "") {
+            indexes.push(i);
+            exprs.push(expr);
+        } else {
+            Line.showText(line, "");
+        }
+    }
+
+    let values = Rust.eval(exprs);
+    for (let i = 0; i < values.length; i++) {
+        let line = lines[indexes[i]];
+        if (values[i].error) {
+            Line.showText(line, values[i].error, "error");
+            continue;
+        }
+
+        switch (values[i].type) {
+        case "undefined":
+        Line.showText(line, "undefined");
+            continue;
+        case "num":
+            Line.showText(line, values[i].data);
+            break;
+        case "matrix":
+            let matrix = values[i].data;
+            Line.showText(line, Math.floor(matrix.entries.length / matrix.width) + "x" + matrix.width + 
+                (matrix.width == 1 ? " vector" : " matrix"));
+            break;
+        }
+    }
+}
+
+function saveLines() {
+    let lines = Line.all();
+    let html = lines.map(x => Line.input(x).innerHTML);
+    localStorage.setItem("lines", JSON.stringify(html));
+}
+
+function loadLines() {
+    if (localStorage.getItem("lines")) {
+        let html = JSON.parse(localStorage.getItem("lines"));
+        for (let item of html) {
+            let line = Line.create();
+            Line.input(line).innerHTML = item;
+            document.getElementById("lines").appendChild(line);
+        }
+    }
+
+    setTimeout(evaluateAll, 500);
+}
+loadLines();
+
+document.getElementById("add-line").addEventListener("click", function() {
+    let lineElem = Line.create();
+    document.getElementById("lines").appendChild(lineElem);
+    Line.focus(lineElem);
+});
+        </script>
+    </body>
+</html>
