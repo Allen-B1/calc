@@ -124,7 +124,7 @@ pub fn eval(node: &Node, symbols: &mut SymbolTable) -> Result<Value, String> {
                                 Value::Matrix(m)
                             } else if v.width == 1 && w.width == 1 && v.height() == 3 && w.height() == 3 {
                                 let m1 = v.entries[1] * w.entries[2] - v.entries[2] * w.entries[1];
-                                let m2 = v.entries[2] * w.entries[3] - v.entries[3] * w.entries[2];
+                                let m2 = v.entries[2] * w.entries[0] - v.entries[0] * w.entries[2];
                                 let m3 = v.entries[0] * w.entries[1] - v.entries[1] * w.entries[0];
                                 Value::Matrix(Matrix{
                                     entries: vec![m1, m2, m3],
@@ -166,4 +166,23 @@ pub fn eval(node: &Node, symbols: &mut SymbolTable) -> Result<Value, String> {
             }
         },
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{ast::parser::{parse, Cursor}, tokenizer::*, eval::SymbolTable};
+
+    use super::eval;
+
+    fn create_toklist(src: &str) -> (Vec<Token>, Cursor) {
+        (Tokenizer::new(src).map(Result::unwrap).collect(), 0)
+    }
+
+    #[test]
+    fn test_matrix() {
+        let (tokens, mut cur) = create_toklist("M = [1, 5 ; 2,  4 ; 3, 5]");
+        let node= parse(&tokens, &mut cur).unwrap();
+        let matrix = eval(&node, &mut SymbolTable::new()).unwrap();
+        dbg!(matrix);
+    }
 }

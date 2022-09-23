@@ -63,6 +63,12 @@ pub fn eval(input: String) -> String {
 }
 
 #[wasm_bindgen]
-pub fn hello() -> String {
-    String::new()
+pub fn get_ident(expr: String) -> Option<String> {
+    let tokens: Result<Vec<_>, _> = tokenizer::Tokenizer::new(&expr).collect();
+    let node = tokens.and_then(|tokens| ast::parser::parse(&tokens, &mut 0));
+    
+    match node {
+        Ok(Node::Assign(name, _)) => Some(name),
+        _ => None
+    }
 }

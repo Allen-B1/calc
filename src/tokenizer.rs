@@ -94,6 +94,7 @@ impl<'a> Iterator for Tokenizer<'a>  {
             Some('(') => Token::LeftParen,
             Some(')') => Token::RightParen,
             Some(';')  => Token::Semicolon,
+            Some(',') => Token::Comma,
             Some('|') => Token::Bar,
             Some('=') => Token::Equal,
             Some(' ' | '\t' | '\n') => return self.next(),
@@ -118,7 +119,8 @@ pub enum Token {
     Semicolon,
     Equal,
 
-    Bar
+    Bar,
+    Comma
 }
 
 #[test]

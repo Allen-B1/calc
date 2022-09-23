@@ -12,6 +12,10 @@ const Rust = {
      */
     eval: function eval(array) {
         return JSON.parse(wasm_bindgen.eval(JSON.stringify(array)));
+    },
+
+    getIdent: function(expr) {
+        return wasm_bindgen.get_ident(expr);
     }
 };        </script>
         <style>
@@ -350,6 +354,9 @@ function convertHTMLToText(el) {
                 for (let j = 0; j < row.cells.length; j++) {
                     let cell = row.cells[j];
                     s += convertHTMLToText(cell)+ " ";
+                    if (j != row.cells.length - 1) {
+                        s += ", ";
+                    }
                 }
                 if (i != node.rows.length - 1)
                     s += "; "
@@ -377,12 +384,16 @@ function evaluateAll() {
     }
 
     let values = Rust.eval(exprs);
+    console.log(exprs);
+    console.log(values);
     for (let i = 0; i < values.length; i++) {
         let line = lines[indexes[i]];
         if (values[i].error) {
             Line.showText(line, values[i].error, "error");
             continue;
         }
+
+        let isAssignment = Rust.getIdent(exprs[i]) != null;
 
         switch (values[i].type) {
         case "undefined":
@@ -393,8 +404,12 @@ function evaluateAll() {
             break;
         case "matrix":
             let matrix = values[i].data;
-            Line.showText(line, Math.floor(matrix.entries.length / matrix.width) + "x" + matrix.width + 
-                (matrix.width == 1 ? " vector" : " matrix"));
+            if (isAssignment) {
+                Line.showText(line, Math.floor(matrix.entries.length / matrix.width) + "x" + matrix.width + 
+                    (matrix.width == 1 ? " vector" : " matrix"));
+            } else {
+                Line.showText(line, "[ " + matrix.entries.map((x, i) => x + " " + ((i+1) % matrix.width == 0 && i != matrix.entries.length - 1 ? "; " : "")).join("") + "]");
+            }
             break;
         }
     }

@@ -27,12 +27,12 @@ pub mod parser {
     use std::iter::Peekable;
     use super::*;
 
-    type TokenListRef<'a> = &'a [Token];
-    type Error = String;
+    pub type TokenListRef<'a> = &'a [Token];
+    pub type Error = String;
 
     /// A cursor is the index of the next token.
     /// To consume, increase the cursor by one.
-    type Cursor = usize;
+    pub type Cursor = usize;
     fn get<'a>(r: TokenListRef<'a>, cur: Cursor) -> Option<&'a Token> {
         if cur >= r.len() {
             None
@@ -129,6 +129,8 @@ pub mod parser {
                 if terminator.eq(&Token::RightBracket) {
                     break
                 }
+            } else if !(current_row.len() == 0 && vec.len() == 0) {
+                expect(r, cur, Token::Comma)?;
             }
 
             // check that the bar is in the right place
@@ -231,26 +233,28 @@ pub mod parser {
         Ok(node)
     }
 
-    /// Parses a number or identifier.
+    /// Parses a number, identifier, or matrix.
     fn parse_atom<'a>(r: TokenListRef<'a>, cur: &mut Cursor) -> Result<Node, Error> {
-        let tok = expect_pred(r, cur, |t| match t {
-            Token::Ident(_) | Token::Num(_) => true,
-            _ => false
-        })?;
-
-        Ok(match tok {
-            Token::Num(n) => Node::Num(*n),
-            Token::Ident(s) => Node::Ident(s.clone()),
-            _ => unreachable!()
-        })
-    }
-
-    fn parse_expr<'a>(r: TokenListRef<'a>, cur: &mut Cursor) -> Result<Node, Error> {
         or (
             r, cur,
             |r, cur| parse_matrix(r, cur).map(Node::Matrix),
-            |r, cur| parse_add(r, cur)
+            |r, cur| {
+                let tok = expect_pred(r, cur, |t| match t {
+                    Token::Ident(_) | Token::Num(_) => true,
+                    _ => false
+                })?;
+        
+                Ok(match tok {
+                    Token::Num(n) => Node::Num(*n),
+                    Token::Ident(s) => Node::Ident(s.clone()),
+                    _ => unreachable!()
+                })
+            }
         )
+    }
+
+    fn parse_expr<'a>(r: TokenListRef<'a>, cur: &mut Cursor) -> Result<Node, Error> {
+        parse_add(r, cur)
     }
 
     /// parses an assignment; returns error if not assignment
@@ -281,7 +285,7 @@ pub mod parser {
 
 
     #[cfg(test)]
-    mod test {
+    mod tests {
         use crate::{tokenizer::{Tokenizer, Token}, ast::parser::{parse_matrix, parse}};
 
         use super::{TokenListRef, Cursor};
@@ -292,13 +296,16 @@ pub mod parser {
 
         #[test]
         fn test() {
-            let (tokens, mut cur) = create_toklist("[a b c; d e f]");
+            let (tokens, mut cur) = create_toklist("[a, b, c; d, e, f]");
             let matrix = parse_matrix(&tokens, &mut cur).unwrap();
     
             let (tokens, mut cur) = create_toklist("5 - 3 + a * 5 + 22b/3cd");
             dbg!(parse(&tokens, &mut cur).unwrap());
 
-            let (tokens, mut cur) = create_toklist("a/-5  -5/a");
+            let (tokens, mut cur) = create_toklist("v*w");
+            dbg!(parse(&tokens, &mut cur).unwrap());
+
+            let (tokens, mut cur) = create_toklist("M = [1, 5 ; 2,  4 ; 3, 5]");
             dbg!(parse(&tokens, &mut cur).unwrap());
         }
     }
