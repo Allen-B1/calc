@@ -5,6 +5,8 @@ pub enum Node {
     Num(f64),
     Ident(String),
     Assign(String, Box<Node>),
+    BinaryOp(Box<Node>, char, Box<Node>),
+    UnaryOp(char, Box<Node>)
 }
 
 #[derive(Debug)]
@@ -39,7 +41,7 @@ pub mod parser {
         }
     }
 
-    /// Consumes the token matching the given token if present,
+    /// Consumes the token matching the given token if and only if it is present,
     /// otherwise errors
     fn expect<'a>(r: TokenListRef<'a>, cur: &mut Cursor, token: Token) -> Result<&'a Token, Error> {
         let tok = get(r, *cur);
@@ -65,6 +67,22 @@ pub mod parser {
         *cur += 1;
         Ok(tok)
     }
+
+    fn or<T>(r: TokenListRef<'_>, cur: &mut Cursor, path1: impl FnOnce(TokenListRef<'_>, &mut Cursor) -> Result<T, Error>, 
+    path2: impl FnOnce(TokenListRef<'_>, &mut Cursor) -> Result<T, Error>) -> Result<T, Error> {
+        let mut cur1 = *cur;
+        let mut cur2 = *cur;
+        let err1 = match path1(r, &mut cur1) {
+            Ok(n) => { *cur = cur1; return Ok(n) }
+            Err(e) => e
+        };
+        let err2 = match path2(r, &mut cur2) {
+            Ok(n) => { *cur = cur2; return Ok(n) }
+            Err(e) => e
+        };
+        Err(format!("tried two paths [{} | {}]", err1, err2))
+    }
+
 
     pub fn parse_matrix<'a>(r: TokenListRef<'a>, cur: &mut Cursor) -> Result<Matrix, Error> {
         expect(r, cur, Token::LeftBracket)?;
@@ -127,7 +145,7 @@ pub mod parser {
                 bar_is_recent = bar_is_recent.map(|_| false);
             }
  
-            let node = parse_atom(r, cur)?;
+            let node = parse_expr(r, cur)?;
             current_row.push(node);
         }
 
@@ -138,8 +156,83 @@ pub mod parser {
         })
     }
 
+    /// Parses binary add & higher precedence operators
+    fn parse_add<'a>(r: TokenListRef<'a>, cur: &mut Cursor) -> Result<Node, Error> {
+        let lhs = parse_mul(r, cur)?;
+        
+        let op = match expect_pred(r, cur, |t| match t {
+            Token::Op('+' | '-') => true,
+            _ => false
+        }) {
+            Err(_) => return Ok(lhs),
+            Ok(Token::Op(c)) => *c,
+            _ => unreachable!()
+        };
+        
+        let rhs = parse_add(r, cur)?;
+
+        Ok( Node::BinaryOp(Box::new(lhs), op, Box::new(rhs)))
+    }
+
+    /// Parses binary mul & higher precedence operators
+    fn parse_mul<'a>(r: TokenListRef<'a>, cur: &mut Cursor) -> Result<Node, Error> {
+        let lhs = parse_unary(r, cur)?;
+        
+        let op = match expect_pred(r, cur, |t| match t {
+            Token::Op('*' | '/' | '.') => true,
+            _ => false
+        }) {
+            Err(_) => return Ok(lhs),
+            Ok(Token::Op(c)) => *c,
+            _ => unreachable!()
+        };
+        
+        let rhs = parse_mul(r, cur)?;
+
+        Ok( Node::BinaryOp(Box::new(lhs), op, Box::new(rhs)))
+    }
+
+    fn parse_unary<'a>(r: TokenListRef<'a>, cur: &mut Cursor) -> Result<Node, Error> {
+        Ok(match expect_pred(r, cur, |token| match token {
+            Token::Op('+' | '-') => true,
+            _ => false
+        }) {
+            Err(_) => parse_mulcat(r, cur)?,
+            Ok(Token::Op(op)) => Node::UnaryOp(*op, Box::new(parse_mulcat(r, cur)?)),
+            _ => unreachable!()
+        })
+    }
+
+    fn parse_mulcat<'a>(r: TokenListRef<'a>, cur: &mut Cursor) -> Result<Node, Error> {
+        let lhs = parse_group(r, cur)?;
+
+        let rhs = or(
+            r,cur,
+            |r, cur| parse_group(r, cur).map(Some),
+            |_, _| Ok(None)
+        )?;
+
+        Ok(match rhs {
+            Some(rhs) => Node::BinaryOp(Box::new(lhs), '*', Box::new(rhs)),
+            None => lhs
+        })
+    }
+
+    /// Parses groups and atoms
+    fn parse_group<'a>(r: TokenListRef<'a>, cur: &mut Cursor) -> Result<Node, Error> {
+        if expect(r, cur, Token::LeftParen).is_err() {
+            return parse_atom(r, cur);
+        }
+
+        let node = parse_expr(r, cur)?;
+
+        expect(r, cur, Token::RightParen)?;
+
+        Ok(node)
+    }
+
     /// Parses a number or identifier.
-    pub fn parse_atom<'a>(r: TokenListRef<'a>, cur: &mut Cursor) -> Result<Node, Error> {
+    fn parse_atom<'a>(r: TokenListRef<'a>, cur: &mut Cursor) -> Result<Node, Error> {
         let tok = expect_pred(r, cur, |t| match t {
             Token::Ident(_) | Token::Num(_) => true,
             _ => false
@@ -152,31 +245,16 @@ pub mod parser {
         })
     }
 
-    fn or(r: TokenListRef<'_>, cur: &mut Cursor, path1: impl FnOnce(TokenListRef<'_>, &mut Cursor) -> Result<Node, Error>, 
-        path2: impl FnOnce(TokenListRef<'_>, &mut Cursor) -> Result<Node, Error>) -> Result<Node, Error> {
-            let mut cur1 = *cur;
-            let mut cur2 = *cur;
-            let err1 = match path1(r, &mut cur1) {
-                Ok(n) => { *cur = cur1; return Ok(n) }
-                Err(e) => e
-            };
-            let err2 = match path2(r, &mut cur2) {
-                Ok(n) => { *cur = cur2; return Ok(n) }
-                Err(e) => e
-            };
-            Err(format!("tried two paths [{} | {}]", err1, err2))
-        }
-
     fn parse_expr<'a>(r: TokenListRef<'a>, cur: &mut Cursor) -> Result<Node, Error> {
         or (
             r, cur,
             |r, cur| parse_matrix(r, cur).map(Node::Matrix),
-            |r, cur| parse_atom(r, cur)
+            |r, cur| parse_add(r, cur)
         )
     }
 
     /// parses an assignment; returns error if not assignment
-    pub fn parse_assign<'a>(r: TokenListRef<'_>, cur: &mut Cursor) -> Result<Node, Error> {
+    fn parse_assign<'a>(r: TokenListRef<'_>, cur: &mut Cursor) -> Result<Node, Error> {
         let ident_tok = expect_pred(r, cur, |t| match t {
             Token::Ident(_) => true,
             _ => false
@@ -201,23 +279,27 @@ pub mod parser {
         )
     }
 
-    #[test]
-    fn test() {
-        let tokens: Vec<_> = Tokenizer::new("[a b c ; d e f]").collect();
-        dbg!(&tokens);
-        let mut cur = 0;
-        let matrix = parse_matrix(&tokens, &mut cur).unwrap();
-        dbg!(&matrix);
 
-        let tokens: Vec<_> = Tokenizer::new("A = [1 2 | d ; 3 4 | a; f f | f]").collect();
-        let mut cur = 0;
-        let node = parse(&tokens, &mut cur).unwrap();
-        dbg!(&node);
+    #[cfg(test)]
+    mod test {
+        use crate::{tokenizer::{Tokenizer, Token}, ast::parser::{parse_matrix, parse}};
 
-        let tokens: Vec<_> = Tokenizer::new("A").collect();
-        let mut cur = 0;
-        let node = parse(&tokens, &mut cur).unwrap();
-        dbg!(&node);
+        use super::{TokenListRef, Cursor};
 
+        fn create_toklist(src: &str) -> (Vec<Token>, Cursor) {
+            (Tokenizer::new(src).map(Result::unwrap).collect(), 0)
+        }
+
+        #[test]
+        fn test() {
+            let (tokens, mut cur) = create_toklist("[a b c; d e f]");
+            let matrix = parse_matrix(&tokens, &mut cur).unwrap();
+    
+            let (tokens, mut cur) = create_toklist("5 - 3 + a * 5 + 22b/3cd");
+            dbg!(parse(&tokens, &mut cur).unwrap());
+
+            let (tokens, mut cur) = create_toklist("a/-5  -5/a");
+            dbg!(parse(&tokens, &mut cur).unwrap());
+        }
     }
 }

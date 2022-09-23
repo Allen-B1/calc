@@ -29,7 +29,7 @@ impl<'a> Tokenizer<'a> {
         return Tokenizer { chars: input.chars() }
     }
 
-    fn parse_ident(&mut self, first: char) -> Option<Token> {
+    fn parse_ident(&mut self, first: char) -> Token {
         let is_long = first == '#';
         let mut ident_name = first.to_string();
 
@@ -48,13 +48,13 @@ impl<'a> Tokenizer<'a> {
             if len != 0 {
                 self.chars.nth(len-1);
             }
-            Some(Token::Ident(ident_name))
+            Token::Ident(ident_name)
         } else {
-            Some(Token::Ident(first.to_string()))
+            Token::Ident(first.to_string())
         }
     }
 
-    fn parse_num(&mut self, first: char) -> Option<Token> {
+    fn parse_num(&mut self, first: char) -> Token {
         let mut out = first.to_string();
         let mut has_dot = false;
         loop {
@@ -76,30 +76,32 @@ impl<'a> Tokenizer<'a> {
         }
 
         let num = out.parse::<f64>().unwrap();
-        Some(Token::Num(num))
+        Token::Num(num)
     }
 }
 
+pub type Error = String;
+
 impl<'a> Iterator for Tokenizer<'a>  {
-    type Item = Token;
+    type Item = Result<Token, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self.chars.next() {
-            None => None,
-            Some(c @ ('+' |  '-' | '*')) => Some(Token::Op(c)),
-            Some('[') => Some(Token::LeftBracket),
-            Some(']') => Some(Token::RightBracket),
-            Some('(') => Some(Token::LeftParen),
-            Some(')') => Some(Token::RightParen),
-            Some(';')  => Some(Token::Semicolon),
-            Some('|') => Some(Token::Bar),
-            Some('=') => Some(Token::Equal),
-            Some(' ' | '\t' | '\n') => self.next(),
+        Some(Ok(match self.chars.next() {
+            None => return None,
+            Some(c @ ('+' |  '-' | '*' | '/' | '.')) => Token::Op(c),
+            Some('[') => Token::LeftBracket,
+            Some(']') => Token::RightBracket,
+            Some('(') => Token::LeftParen,
+            Some(')') => Token::RightParen,
+            Some(';')  => Token::Semicolon,
+            Some('|') => Token::Bar,
+            Some('=') => Token::Equal,
+            Some(' ' | '\t' | '\n') => return self.next(),
             Some(c @ 'A'..='Z' | c @ 'a'..='z') => self.parse_ident(c),
             Some('#') => self.parse_ident('#'),
             Some(c @ '0'..='9') => self.parse_num(c),
-            _ => None
-        }
+            Some(c) => return Some(Err(format!("unexpected character {}", c)))
+        }))
     }
 }
 
@@ -119,15 +121,14 @@ pub enum Token {
     Bar
 }
 
-
 #[test]
 fn test_tokenize() {
     let mut tokenizer = Tokenizer::new("[1 (2x + 3)]");
-    assert_eq!(tokenizer.next(), Some(Token::LeftBracket));
-    assert_eq!(tokenizer.next(), Some(Token::Num(1.0)));   
-    assert_eq!(tokenizer.next(), Some(Token::LeftParen));
-    assert_eq!(tokenizer.next(), Some(Token::Num(2.0)));   
-    assert_eq!(tokenizer.next(), Some(Token::Ident("x".to_string())));   
+    assert_eq!(tokenizer.next().unwrap().unwrap(), Token::LeftBracket);
+    assert_eq!(tokenizer.next().unwrap().unwrap(), Token::Num(1.0));   
+    assert_eq!(tokenizer.next().unwrap().unwrap(), Token::LeftParen);
+    assert_eq!(tokenizer.next().unwrap().unwrap(), Token::Num(2.0));   
+    assert_eq!(tokenizer.next().unwrap().unwrap(), Token::Ident("x".to_string()));   
 
     let mut tok = Tokenizer::new("#xaxaxa bc sin co");
     dbg!(tok.collect::<Vec<_>>());

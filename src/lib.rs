@@ -21,8 +21,8 @@ pub fn eval(input: String) -> String {
         let mut errors = Vec::new();
 
         for (idx, str) in input.iter().enumerate() {
-            let tokens: Vec<_> = tokenizer::Tokenizer::new(str).collect();
-            let node = ast::parser::parse(&tokens, &mut 0); 
+            let tokens: Result<Vec<_>, _> = tokenizer::Tokenizer::new(str).collect();
+            let node = tokens.and_then(|tokens| ast::parser::parse(&tokens, &mut 0)); 
             match node {
                 Ok(node @ Node::Assign(_, _)) => assignments.push((idx, node)),
                 Ok(node) => exprs.push((idx, node)),
