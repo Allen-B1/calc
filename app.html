@@ -206,6 +206,7 @@ function handleMatrixCellKeydown(evt, cell) {
 
 // TODO: Leaky abstractions w.r.t. parent
 const Line = {
+    lastFocused: null,
     _attachInputHandlers: function(inputElem) {
         inputElem.addEventListener("input", function(evt) {
             let selection = window.getSelection();
@@ -240,6 +241,7 @@ const Line = {
                 handleMatrixCellKeydown(evt, cell);
             } else {
                 let lineElem = document.activeElement.parentElement;
+                console.log(lineElem);
                 if (evt.code == "Enter") {
                     if (lineElem.nextElementSibling != null) {
                         Line.focus(lineElem.nextElementSibling);
@@ -264,8 +266,12 @@ const Line = {
                     return false;
                 } else if (evt.code == "Backspace") {
                     if (this.textContent.trim() == "") {
-                        let newLine = this.parentElement.previousElementSibling;
-                        this.parentElement.remove();
+                        let newLine = lineElem.previousElementSibling;
+                        if (newLine == null || !newLine.classList.contains("line")) {
+                            newLine = lineElem.nextElementSibling;
+                        }
+                        console.log(newLine);
+                        lineElem.remove();
                         Line.focus(newLine);
                         evt.preventDefault();
                     }
@@ -276,6 +282,10 @@ const Line = {
             this.parentElement.classList.add("focus");
         });
         inputElem.addEventListener("blur", function() {
+            if (this.parentElement != null) {
+                Line.lastFocused = this.parentElement;
+                setTimeout(() => Line.lastFocused = null, 100);
+            }
             this.parentElement.classList.remove("focus");
         });
     },
@@ -437,7 +447,11 @@ loadLines();
 
 document.getElementById("add-line").addEventListener("click", function() {
     let lineElem = Line.create();
-    document.getElementById("lines").appendChild(lineElem);
+    if (Line.lastFocused != null && Line.lastFocused.nextElementSibling != null) {
+        Line.lastFocused.parentElement.insertBefore(lineElem, Line.lastFocused.nextElementSibling);
+    } else {
+        document.getElementById("lines").appendChild(lineElem);
+    }
     Line.focus(lineElem);
 });
         </script>
