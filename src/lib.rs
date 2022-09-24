@@ -3,7 +3,7 @@ use std::iter::Peekable;
 use serde_json::json;
 use wasm_bindgen::{prelude::*, JsCast};
 
-use crate::{eval::{SymbolTable, Value}, ast::Node};
+use crate::{eval::{SymbolTable, Value, SymbolExprTable}, ast::Node};
 
 mod tokenizer;
 mod ast;
@@ -24,19 +24,30 @@ pub fn eval(input: String) -> String {
             let tokens: Result<Vec<_>, _> = tokenizer::Tokenizer::new(str).collect();
             let node = tokens.and_then(|tokens| ast::parser::parse(&tokens, &mut 0)); 
             match node {
-                Ok(node @ Node::Assign(_, _)) => assignments.push((idx, node)),
+                Ok(node @ Node::Assign(_, _, _)) => assignments.push((idx, node)),
                 Ok(node) => exprs.push((idx, node)),
                 Err(err) => errors.push((idx, err))
             }
         }
 
-        let mut values = vec![Err("".to_string()); input.len()];
+        let mut expr_table = SymbolExprTable::new();
         let mut table = SymbolTable::new();
+        let mut values = vec![Err("".to_string()); input.len()];
         for (idx, node) in assignments.iter() {
-            values[*idx] = eval::eval(&node, &mut table);
+            let expr = eval::create_expr(node, &mut expr_table, &mut |_, _|{});
+            let ident = match node {
+                Node::Assign(ident, _, _) => ident,
+                _ => unreachable!()
+            };
+            let value = expr.and_then(|expr| eval::eval_expr(&expr, &table));
+            if value.is_ok() {
+                table.insert(ident.clone(), value.clone().unwrap());
+            }
+            values[*idx] = value;
         }
         for (idx, node) in exprs.iter() {
-            values[*idx] = eval::eval(&node, &mut table);
+            let expr = eval::create_expr(node, &mut expr_table, &mut |_, _|{});
+            values[*idx] = expr.and_then(|expr| eval::eval_expr(&expr, &mut table));
         }
         for (idx, err) in errors {
             values[idx] = Err(err);
@@ -68,7 +79,7 @@ pub fn get_ident(expr: String) -> Option<String> {
     let node = tokens.and_then(|tokens| ast::parser::parse(&tokens, &mut 0));
     
     match node {
-        Ok(Node::Assign(name, _)) => Some(name),
+        Ok(Node::Assign(name, _, _)) => Some(name),
         _ => None
     }
 }

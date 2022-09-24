@@ -241,7 +241,6 @@ const Line = {
                 handleMatrixCellKeydown(evt, cell);
             } else {
                 let lineElem = document.activeElement.parentElement;
-                console.log(lineElem);
                 if (evt.code == "Enter") {
                     if (lineElem.nextElementSibling != null) {
                         Line.focus(lineElem.nextElementSibling);
@@ -429,6 +428,8 @@ function evaluateAll() {
                 Line.showText(line, "[ " + matrix.entries.map((x, i) => formatNum(x) + " " + ((i+1) % matrix.width == 0 && i != matrix.entries.length - 1 ? "; " : "")).join("") + "]");
             }
             break;
+        case "func":
+            Line.showText(line, "Function");
         }
     }
 }

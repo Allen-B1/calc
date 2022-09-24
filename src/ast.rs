@@ -4,7 +4,7 @@ pub enum Node {
     Matrix(Matrix),
     Num(f64),
     Ident(String),
-    Assign(String, Box<Node>),
+    Assign(String, Vec<String>, Box<Node>),
     BinaryOp(Box<Node>, char, Box<Node>),
     UnaryOp(char, Box<Node>)
 }
@@ -264,6 +264,32 @@ pub mod parser {
             _ => false
         })?;
 
+        let mut params = Vec::new();
+        if expect(r, cur, Token::LeftParen).is_ok() {
+            loop {
+                let tok = expect_pred(r, cur, |t| match t {
+                    Token::Ident(_) => true,
+                    _ => false
+                })?;
+                let param = match tok {
+                    Token::Ident(s) => s,
+                    _ => unreachable!()
+                };
+
+                params.push(param.clone());
+                
+                let terminator = expect_pred(r, cur, |t| match t {
+                    Token::Comma | Token::RightParen => true,
+                    _ => false
+                })?;
+                match terminator {
+                    Token::Comma => continue,
+                    Token::RightParen => break,
+                    _ => unreachable!()
+                }
+            }
+        };
+
         expect(r, cur, Token::Equal)?;
         
         let expr_node = parse_expr(r, cur)?;        
@@ -272,7 +298,7 @@ pub mod parser {
             _ => unreachable!()
         };
 
-        Ok(Node::Assign(ident.clone(), Box::new(expr_node)))
+        Ok(Node::Assign(ident.clone(), params, Box::new(expr_node)))
     }
 
     pub fn parse<'a>(r: TokenListRef<'_>, cur: &mut Cursor) -> Result<Node, Error> {
