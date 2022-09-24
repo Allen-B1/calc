@@ -180,7 +180,7 @@ pub mod parser {
     fn parse_mul<'a>(r: TokenListRef<'a>, cur: &mut Cursor) -> Result<Node, Error> {
         let lhs = parse_unary(r, cur)?;
         
-        let op = match expect_pred(r, cur, |t| match t {
+        let op = match expect_pred(r, cur,  |t| match t {
             Token::Op('*' | '/' | '.') => true,
             _ => false
         }) {

@@ -393,6 +393,14 @@ function evaluateAll() {
         }
     }
 
+    function formatNum(num) {
+        if (num[1] == 0) {
+            return num[0] + "";
+        } else {
+            return num[0] + "+" + num[1] + "i";
+        }
+    }
+
     let values = Rust.eval(exprs);
     console.log(exprs);
     console.log(values);
@@ -410,7 +418,7 @@ function evaluateAll() {
             Line.showText(line, "undefined");
             continue;
         case "num":
-            Line.showText(line, values[i].data);
+            Line.showText(line, formatNum(values[i].data));
             break;
         case "matrix":
             let matrix = values[i].data;
@@ -418,7 +426,7 @@ function evaluateAll() {
                 Line.showText(line, Math.floor(matrix.entries.length / matrix.width) + "x" + matrix.width + 
                     (matrix.width == 1 ? " vector" : " matrix"));
             } else {
-                Line.showText(line, "[ " + matrix.entries.map((x, i) => x + " " + ((i+1) % matrix.width == 0 && i != matrix.entries.length - 1 ? "; " : "")).join("") + "]");
+                Line.showText(line, "[ " + matrix.entries.map((x, i) => formatNum(x) + " " + ((i+1) % matrix.width == 0 && i != matrix.entries.length - 1 ? "; " : "")).join("") + "]");
             }
             break;
         }
