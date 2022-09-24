@@ -340,33 +340,33 @@ pub fn create_expr(node: &Node, symbols: &mut SymbolExprTable, undefined_variabl
                 Err(format!("variable {} already defined", ident))?
             }
 
-            let mut param_classes = Vec::new();
             let expr = if params.len() !=0 { 
                 let mut func_symbols = symbols.clone();
+                let mut param_classes = Vec::new();
                 for param in params.iter() {
                     func_symbols.insert(param.clone(), Expr::opaque(Class::Any));
                     param_classes.push(Class::Any);
                 }
 
-                create_expr(rhs, &mut func_symbols, undefined_variable)?
-            } else if ident == "y" && !symbols.contains_key("x") {
+                let inner_expr = create_expr(rhs, &mut func_symbols, undefined_variable)?;
+                Expr {
+                    class: Class::Func(param_classes, Box::new(inner_expr.class.clone())),
+                    data: ExprData::Func(params.clone(), Box::new(inner_expr))
+                }
+            } else if ident.eq("y") && !symbols.contains_key("x") {
                 let mut func_symbols = symbols.clone();
                 func_symbols.insert("x".to_string(), Expr::opaque(Class::Num(NumClass::Real)));
-                param_classes.push(Class::Num(NumClass::Real));
-                create_expr(rhs, symbols, undefined_variable)?
+                let inner_expr = create_expr(rhs, &mut func_symbols, undefined_variable)?;
+                Expr {
+                    class: Class::Func(vec![Class::Num(NumClass::Real)], Box::new(inner_expr.class.clone())),
+                    data: ExprData::Func(params.clone(), Box::new(inner_expr))
+                }
             } else {
                 create_expr(rhs, symbols, undefined_variable)?
             };
 
             symbols.insert(ident.clone(), expr.clone());
-            if params.len() == 0 {
-                expr
-            } else {
-                Expr {
-                    class: Class::Func(param_classes, Box::new(expr.class.clone())),
-                    data: ExprData::Func(params.clone(), Box::new(expr))
-                }
-            }
+            expr
         },
         Node::BinaryOp(lhs, op, rhs) => {
             let lhs = create_expr(lhs, symbols, undefined_variable)?;
