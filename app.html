@@ -34,6 +34,9 @@ main {
 .sidebar {
     width: 400px;
     border-right: 1px solid hsl(0, 0%, 50%);
+
+    display: flex;
+    flex-direction: column;
 }
 .toolbar {
     background: hsl(0, 0%, 87.5%);
@@ -53,6 +56,10 @@ main {
 }
 .toolbar button:active {
     filter:brightness(75%);
+}
+#lines {
+    overflow: auto;
+    flex-grow: 1;
 }
 .line {
     padding: 8px 16px;
