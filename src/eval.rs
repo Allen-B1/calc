@@ -4,7 +4,7 @@ use serde::{Serialize, Serializer, ser::{SerializeTuple, SerializeSeq}, Deserial
 
 use crate::{ast::Node, tokenizer::Tokenizer};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", content = "data")]
 pub enum Class {
     Any,
@@ -55,6 +55,18 @@ impl Class {
                     _ => Class::Any
                 }
             },
+            (Class::Func(params2, out2), Class::Func(params1, out1)) => {
+                match op {
+                    '.' => {
+                        if params2.len() == 1 && params2[0] == **out1 {
+                            Class::Func(params1.clone(), out2.clone())
+                        } else {
+                            Class::Any
+                        }     
+                    },
+                    _ => Class::Any
+                }
+            },  
             _ => Class::Any
         }
     }
@@ -202,7 +214,7 @@ impl Matrix {
             return None;
         }
         
-        let mut m = Matrix {
+        let m = Matrix {
             entries: self.entries.iter().enumerate().map(|(i, v)| rhs.entries[i] + *v).collect(),
             width: self.width,
             augmented: false
@@ -277,7 +289,7 @@ pub fn eval_expr(expr: &Expr, symbols: &SymbolTable) -> Result<Value, Error> {
             for (i, param) in params.iter().enumerate() {
                 new_symbols.insert(param_names[i].0.clone(), eval_expr(param, symbols)?);
             }
-            eval_expr(&expr, symbols)?
+            eval_expr(&expr, &new_symbols)?
         },
         ExprData::Add(a, b) => {
             let lhs = eval_expr(a, symbols)?;
@@ -343,6 +355,43 @@ pub fn eval_expr(expr: &Expr, symbols: &SymbolTable) -> Result<Value, Error> {
             match (lhs, rhs) {
                 (Value::Matrix(lhs), Value::Matrix(rhs)) => {
                     Value::Num(lhs.dot(&rhs).ok_or(format!("can't multiply {}x{} and {}x{} matrices", lhs.height(), lhs.width, rhs.height(), rhs.width))?)
+                },
+                (Value::Func(params2, expr2), Value::Func(params1, expr1)) => {
+                    if params2.len() != 1 {
+                        Err(format!("cannot call function with multivariable input"))?;
+                    }
+
+                    Value::Func(params1.clone(), Box::new(Expr {
+                        class: expr2.class.clone(),
+                        data: ExprData::Call(
+                            // f
+                            Box::new(Expr{
+                                class: Class::Func(params2.iter().map(|x| x.1.clone()).collect(), Box::new(expr2.class.clone())),
+                                data: ExprData::Func(
+                                    params2.iter().map(|x| x.0.clone()).collect(),
+                                    expr2,
+                                )
+                            }),
+                            // input to f
+                            vec![Expr {
+                                class: expr1.class.clone(),
+                                data: ExprData::Call(
+                                    // g
+                                    Box::new(Expr {
+                                        class: Class::Func(params1.iter().map(|x| x.1.clone()).collect(), Box::new(expr1.class.clone())),
+                                        data: ExprData::Func(
+                                            params1.iter().map(|x| x.0.clone()).collect(),
+                                            expr1,
+                                        )
+                                    }),
+                                    params1.iter()
+                                        .map(|(a, b)| (ExprData::Ident(a.clone()), b.clone()))
+                                        .map(|(a, b)| Expr {class: b, data: a})
+                                        .collect()
+                                )
+                            }]
+                        )
+                    }))
                 },
                 (lhs, rhs) => Err(format!("cannot dot {} and {}", lhs.class(), rhs.class()))?
             }

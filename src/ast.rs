@@ -241,7 +241,7 @@ pub mod parser {
 
         let rhs = or(
             r,cur,
-            |r, cur| parse_group(r, cur).map(Some),
+            |r, cur| parse_mulcat(r, cur).map(Some),
             |_, _| Ok(None)
         )?;
 
