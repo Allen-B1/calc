@@ -1,10 +1,10 @@
 use std::{collections::HashMap, fmt::Display};
 use num::{Zero, complex::Complex64};
-use serde::{Serialize, Serializer, ser::{SerializeTuple, SerializeSeq}};
+use serde::{Serialize, Serializer, ser::{SerializeTuple, SerializeSeq}, Deserialize};
 
 use crate::{ast::Node, tokenizer::Tokenizer};
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data")]
 pub enum Class {
     Any,
@@ -20,7 +20,47 @@ impl Display for Class {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Copy, PartialEq, Eq)]
+impl Class {
+    pub fn combine(&self, rhs: &Class, op: char) -> Class {
+        let lhs = self;
+        match (&lhs, &rhs) {
+            (Class::Num(a), Class::Num(b)) => {
+                let class = a.combine(*b);
+                Class::Num(class)
+            },
+            (Class::Num(a), Class::Matrix(n, row, col)) => {
+                let class = a.combine(*n);
+                Class::Matrix(class, *row, *col)
+            },
+            (Class::Matrix(a, arow, acol), Class::Matrix(b, brow, bcol)) => {
+                let class = a.combine(*b);
+
+                match op {
+                    '+' => {
+                        if arow == brow && acol == bcol {
+                            Class::Matrix(class, *arow, *acol)
+                        } else {
+                            Class::Any
+                        }
+                    },
+                    '*' => {
+                        if acol == brow {
+                            Class::Matrix(class, *arow, *bcol)
+                        } else if *arow == 3 && *brow == 3&& *acol == 1 && *bcol == 1 {
+                            Class::Matrix(class, 3, 1)
+                        } else {
+                            Class::Any
+                        }
+                    },
+                    _ => Class::Any
+                }
+            },
+            _ => Class::Any
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Copy, PartialEq, Eq)]
 pub enum NumClass {
     Int,
     Real,
@@ -43,7 +83,6 @@ impl NumClass {
 #[serde(rename_all = "lowercase")]
 pub enum Value {
     Undefined,
-    #[serde(serialize_with="serialize_num")]
     Num(Complex64),
     Matrix(Matrix),
     Func(Vec<(String, Class)>, Box<Expr>)
@@ -84,25 +123,9 @@ impl Value {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Matrix {
-    #[serde(serialize_with="serialize_matrix")]
     pub entries: Vec<Complex64>,
     pub width: usize,
     pub augmented: bool,
-}
-
-fn serialize_num<S: Serializer>(num: &Complex64, s: S) -> Result<S::Ok, S::Error> {
-    let mut t = s.serialize_tuple(2)?;
-    t.serialize_element(&num.re)?;
-    t.serialize_element(&num.im)?;
-    t.end()
-}
-
-fn serialize_matrix<S: Serializer>(entries: &Vec<Complex64>, s: S) -> Result<S::Ok, S::Error> {
-    let mut seq = s.serialize_seq(Some(entries.len()))?;
-    for num in entries.iter() {
-        seq.serialize_element(&(num.re, num.im))?;
-    }
-    seq.end()
 }
 
 impl Matrix {
@@ -189,7 +212,7 @@ impl Matrix {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Expr {
     class: Class,
     data: ExprData,
@@ -218,7 +241,7 @@ impl Expr {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data_data")]
 pub enum ExprData {
     Ident(String),
@@ -228,6 +251,7 @@ pub enum ExprData {
         width: usize,
         augmented: bool,
     },
+    Call(Box<Expr>, Vec<Expr>),
     Add(Box<Expr>, Box<Expr>),
     Mul(Box<Expr>, Box<Expr>),
     Div(Box<Expr>, Box<Expr>),
@@ -242,6 +266,19 @@ pub fn eval_expr(expr: &Expr, symbols: &SymbolTable) -> Result<Value, Error> {
     Ok(match &expr.data {
         ExprData::Ident(s) => symbols.get(s).ok_or(format!("variable {} is not defined", s))?.clone(),
         ExprData::Num(n) => Value::Num(Complex64::new(*n, 0.0)),
+        ExprData::Call(lhs, params) => {
+            let lhs = eval_expr(lhs, symbols)?;
+            let (param_names, expr) = match lhs {
+                Value::Func(params, expr) => (params, expr),
+                _ => Err(format!("cannot call a non-function of type {}", lhs.class()))?
+            };
+            
+            let mut new_symbols = symbols.clone();
+            for (i, param) in params.iter().enumerate() {
+                new_symbols.insert(param_names[i].0.clone(), eval_expr(param, symbols)?);
+            }
+            eval_expr(&expr, symbols)?
+        },
         ExprData::Add(a, b) => {
             let lhs = eval_expr(a, symbols)?;
             let rhs = eval_expr(b, symbols)?;
@@ -372,40 +409,7 @@ pub fn create_expr(node: &Node, symbols: &mut SymbolExprTable, undefined_variabl
             let lhs = create_expr(lhs, symbols, undefined_variable)?;
             let rhs = create_expr(rhs, symbols, undefined_variable)?;
 
-            let class = match (&lhs.class, &rhs.class) {
-                (Class::Num(a), Class::Num(b)) => {
-                    let class = a.combine(*b);
-                    Class::Num(class)
-                },
-                (Class::Num(a), Class::Matrix(n, row, col)) => {
-                    let class = a.combine(*n);
-                    Class::Matrix(class, *row, *col)
-                },
-                (Class::Matrix(a, arow, acol), Class::Matrix(b, brow, bcol)) => {
-                    let class = a.combine(*b);
-
-                    match op {
-                        '+' => {
-                            if arow == brow && acol == bcol {
-                                Class::Matrix(class, *arow, *acol)
-                            } else {
-                                Class::Any
-                            }
-                        },
-                        '*' => {
-                            if acol == brow {
-                                Class::Matrix(class, *arow, *bcol)
-                            } else if *arow == 3 && *brow == 3&& *acol == 1 && *bcol == 1 {
-                                Class::Matrix(class, 3, 1)
-                            } else {
-                                Class::Any
-                            }
-                        },
-                        _ => Class::Any
-                    }
-                },
-                _ => Class::Any
-            };
+            let class = lhs.class.combine(&rhs.class, *op);
             match op {
                 '+' => Expr::new_add(class, lhs, rhs),
                 '-' => Expr::new_sub(class, NumClass::Int, lhs, rhs),
@@ -453,6 +457,28 @@ pub fn create_expr(node: &Node, symbols: &mut SymbolExprTable, undefined_variabl
 
             Expr { class, data: ExprData::Num(*n) }
         },
+        Node::Call(lhs, params) => {
+            let lhs = create_expr(lhs, symbols, undefined_variable)?;
+            let ret = match &lhs.class {
+                Class::Func(_, output) => Some(&*output as &Class),
+                _ => None
+            };
+            if params.len() != 1 ||  ret.is_some() {
+                let mut param_exprs = Vec::new();
+                for param in params {
+                    param_exprs.push(create_expr(param, symbols, undefined_variable)?);
+                }
+                Expr {
+                    class: ret.map(Clone::clone).unwrap_or(Class::Any),
+                    data: ExprData::Call(Box::new(lhs), param_exprs)
+                }
+            } else {
+                let rhs = &params[0];
+                let rhs = create_expr(rhs, symbols, undefined_variable)?;
+                let class = lhs.class.combine(&rhs.class, '*');
+                Expr::new_mul(class, lhs, rhs)
+            }
+        }
     })
 }
 /*

@@ -6,7 +6,8 @@ pub enum Node {
     Ident(String),
     Assign(String, Vec<String>, Box<Node>),
     BinaryOp(Box<Node>, char, Box<Node>),
-    UnaryOp(char, Box<Node>)
+    UnaryOp(char, Box<Node>),
+    Call(Box<Node>, Vec<Node>),
 }
 
 #[derive(Debug)]
@@ -158,6 +159,9 @@ pub mod parser {
         })
     }
 
+    // The operations below are listed from
+    // lowest precedence to highest precedence.
+
     /// Parses binary add & higher precedence operators
     fn parse_add<'a>(r: TokenListRef<'a>, cur: &mut Cursor) -> Result<Node, Error> {
         let lhs = parse_mul(r, cur)?;
@@ -199,10 +203,37 @@ pub mod parser {
             Token::Op('+' | '-') => true,
             _ => false
         }) {
-            Err(_) => parse_mulcat(r, cur)?,
-            Ok(Token::Op(op)) => Node::UnaryOp(*op, Box::new(parse_mulcat(r, cur)?)),
+            Err(_) => parse_call(r, cur)?,
+            Ok(Token::Op(op)) => Node::UnaryOp(*op, Box::new(parse_call(r, cur)?)),
             _ => unreachable!()
         })
+    }
+
+    /// Parses a function call, or concatenative multiplication
+    fn parse_call<'a>(r: TokenListRef<'a>, cur: &mut Cursor) -> Result<Node, Error> {
+        or(
+            r, cur,
+            |r, cur| -> Result<Node, Error> {
+                let lhs = parse_group(r, cur)?;
+                expect(r, cur, Token::LeftParen)?;
+                let mut exprs=  Vec::new();
+                loop {
+                    let expr = parse_expr(r, cur)?;
+                    let next = expect_pred(r, cur, |t| match t {
+                        Token::RightParen | Token::Comma => true,
+                        _ => false 
+                    })?;
+                    exprs.push(expr);
+                    match next {
+                        Token::Comma => continue,
+                        Token::RightParen => break,
+                        _ => unreachable!()
+                    }
+                }
+                Ok(Node::Call(Box::new(lhs), exprs))
+            },
+            parse_mulcat
+        )
     }
 
     fn parse_mulcat<'a>(r: TokenListRef<'a>, cur: &mut Cursor) -> Result<Node, Error> {
@@ -308,7 +339,6 @@ pub mod parser {
             parse_expr
         )
     }
-
 
     #[cfg(test)]
     mod tests {
