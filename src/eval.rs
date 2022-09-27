@@ -64,6 +64,16 @@ impl Class {
                             Class::Any
                         }     
                     },
+                    '+' | '*' => {
+                        if params2.len() == params1.len() {
+                            Class::Func(
+                                params2.iter().zip(params1.iter()).map(|(a, b)| if a == b { a.clone() } else { Class::Any }).collect(),
+                                Box::new(out2.combine(out1, op))
+                            )
+                        } else {
+                            Class::Any
+                        }
+                    }
                     _ => Class::Any
                 }
             },  
@@ -302,6 +312,14 @@ pub fn eval_expr(expr: &Expr, symbols: &SymbolTable) -> Result<Value, Error> {
                 (Value::Num(lhs), Value::Num(rhs)) => {
                     Value::Num(lhs + rhs)
                 },
+                (Value::Func(params1, expr1), Value::Func(params2, expr2)) => {
+                    if params1.len() != params2.len() {
+                        Err(format!("cannot add functions with {} and {} parameters", params1.len(), params2.len()))?
+                    }
+                    Value::Func(params1.clone(),
+                        Box::new(Expr::new_add(expr1.class.combine(&expr2.class, '+'), *expr1, *expr2))
+                    )
+                },
                 (lhs, rhs) => Err(format!("cannot add {} and {}", lhs.class(), rhs.class()))?
             }
         },
@@ -322,6 +340,14 @@ pub fn eval_expr(expr: &Expr, symbols: &SymbolTable) -> Result<Value, Error> {
                 },
                 (Value::Num(scalar), Value::Matrix(vector)) => {
                     Value::Matrix(vector.scalar_mul(scalar))
+                },
+                (Value::Func(params1, expr1), Value::Func(params2, expr2)) => {
+                    if params1.len() != params2.len() {
+                        Err(format!("cannot multiply functions with {} and {} parameters", params1.len(), params2.len()))?
+                    }
+                    Value::Func(params1.clone(),
+                        Box::new(Expr::new_mul(expr1.class.combine(&expr2.class, '*'), *expr1, *expr2))
+                    )
                 },
                 (lhs, rhs) => Err(format!("cannot multiply {} and {}", lhs.class(), rhs.class()))?
             }
