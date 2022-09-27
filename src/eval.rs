@@ -158,7 +158,7 @@ impl Matrix {
     }
 
     pub fn cross(&self, rhs: &Matrix) -> Option<Matrix> {
-        if self.width == 1 && rhs.width == 1 && self.height() == 3 && rhs.height() == 3 {
+        if !(self.width == 1 && rhs.width == 1 && self.height() == 3 && rhs.height() == 3) {
             return None
         }
         if !self.entries.iter().all(|x| x.im == 0.0) || !rhs.entries.iter().all(|x| x.im == 0.0) {
@@ -179,7 +179,7 @@ impl Matrix {
     }
 
     pub fn mul(&self, rhs: &Matrix) -> Option<Matrix> {
-        if self.width == rhs.height() {
+        if self.width != rhs.height() {
             return None
         }
 
@@ -358,7 +358,7 @@ pub fn eval_expr(expr: &Expr, symbols: &SymbolTable) -> Result<Value, Error> {
                 },
                 (Value::Func(params2, expr2), Value::Func(params1, expr1)) => {
                     if params2.len() != 1 {
-                        Err(format!("cannot call function with multivariable input"))?;
+                        Err(format!("cannot compose function with multivariable input"))?;
                     }
 
                     Value::Func(params1.clone(), Box::new(Expr {
@@ -399,7 +399,7 @@ pub fn eval_expr(expr: &Expr, symbols: &SymbolTable) -> Result<Value, Error> {
         ExprData::Matrix { entries, width, augmented } => {
             let entries: Vec<Complex64> = entries.iter().map(|entry| match eval_expr(entry, symbols)? {
                 Value::Num(n) => Ok(n),
-                _ => Err(format!("matrix cannot contain non-number entries: {:?}", entry))
+                value => Err(format!("matrix cannot contain non-number entries: {}", value.class()))
             }).collect::<Result<_,_>>()?;
             Value::Matrix(Matrix {
                 entries,

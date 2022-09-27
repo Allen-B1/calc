@@ -68,7 +68,7 @@ main {
 .line-input {
     padding: 0;
 }
-.line br {
+.line br:not(:only-child) {
     display: none;
 }
 .line-text {
@@ -93,6 +93,9 @@ main {
     border-right: 2px solid #000;
     position: relative;
     vertical-align: middle;
+    
+    margin-left: 4px;
+    margin-right: 4px;
 }
 .matrix::before, .matrix::after {
     content: " ";
@@ -140,8 +143,7 @@ function focusMatrixCell(cell) {
     selection.addRange(newRange);            
 }
 
-function createMatrixCell() {
-    let cell = document.createElement("td");
+function initMatrixCell(cell) {
     cell.contentEditable = true;
     cell.innerHTML = "0";
     return cell;
@@ -151,22 +153,30 @@ function createMatrixElement() {
     let elem = document.createElement("table");
     elem.classList.add("matrix");
     let row = document.createElement("tr");
-    let cell = createMatrixCell();
+    let cell = row.insertCell();
+    initMatrixCell(cell);
     row.appendChild(cell);
     elem.appendChild(row);
     return [elem, cell];
 }
 
 function handleMatrixCellKeydown(evt, cell) {
-    let matrixElem = cell.parentElement.parentElement;
+    let matrixElem = cell.parentElement.parentElement.classList.contains("matrix") ? 
+    cell.parentElement.parentElement :
+    cell.parentElement.parentElement.parentElement;
     let rowElem = cell.parentElement;
-    if (evt.code == "Tab" || (evt.code == "Space" && cell.textContent.split("(").length == cell.textContent.split(")").length)) {
+
+    console.assert(matrixElem.classList.contains("matrix"), "matrixElem is not matrix");
+    console.assert(rowElem.tagName.toLowerCase() == "tr", "rowElem is not <tr>");
+    console.assert(cell.tagName.toLowerCase() == "td", "cell is not <td>");
+
+    if (evt.code == "Tab") {
         if (!evt.shiftKey) {
             if (cell.nextElementSibling != null) {
                 focusMatrixCell(cell.nextElementSibling);
             } else {
-                for (let row of Array.from(matrixElem.children)) {
-                    row.appendChild(createMatrixCell());
+                for (let row of Array.from(matrixElem.rows)) {
+                    initMatrixCell(row.insertCell());
                 }
                 focusMatrixCell(rowElem.lastElementChild);
             }
@@ -178,36 +188,102 @@ function handleMatrixCellKeydown(evt, cell) {
         evt.preventDefault();
         return false;
     } else if (evt.code == "Enter") {
-        let idx = Array.from(rowElem.children).indexOf(cell);
         if (rowElem.nextElementSibling != null) {
-            focusMatrixCell(rowElem.nextElementSibling.children[idx]);
+            focusMatrixCell(rowElem.nextElementSibling.children[0]);
         } else {
             let nChildren = rowElem.children.length;
-            let newRow = document.createElement("tr");
+            let newRow = matrixElem.insertRow();
             for (let i =0 ; i< nChildren; i++) {
-                let cell = createMatrixCell();
-                newRow.appendChild(cell);
+                initMatrixCell(newRow.insertCell());
             }
-            matrixElem.appendChild(newRow);
 
-            focusMatrixCell(newRow.children[idx]);
+            focusMatrixCell(newRow.children[0]);
         }
         evt.preventDefault();
         return false;
     } else if (evt.code == "ArrowDown") {
-        let idx = Array.from(rowElem.children).indexOf(cell);
+        let idx = Array.from(rowElem.cells).indexOf(cell);
         if (rowElem.nextElementSibling != null) {
-            focusMatrixCell(rowElem.nextElementSibling.children[idx]);
+            focusMatrixCell(rowElem.nextElementSibling.cells[idx]);
         }
         evt.preventDefault();
         return false;
     } else if (evt.code == "ArrowUp") {
-        let idx = Array.from(rowElem.children).indexOf(cell);
+        let idx = Array.from(rowElem.cells).indexOf(cell);
         if (rowElem.previousElementSibling != null) {
-            focusMatrixCell(rowElem.previousElementSibling.children[idx]);
+            focusMatrixCell(rowElem.previousElementSibling.cells[idx]);
         }
         evt.preventDefault();
         return false;
+    } else if (evt.code == "ArrowLeft") {
+        let selection = window.getSelection();
+        if (evt.ctrlKey || 
+            (selection.focusNode == selection.anchorNode && selection.anchorNode == cell && selection.focusOffset == 0)  ||
+            (selection.focusNode == selection.anchorNode && selection.anchorNode.parentElement == cell && selection.focusOffset == 0)) {
+            if (cell.previousElementSibling != null) {
+                focusMatrixCell(cell.previousElementSibling);
+                evt.preventDefault();
+            } else {
+                if (matrixElem.previousSibling == null || !(matrixElem.previousSibling instanceof Text)) {
+                    matrixElem.parentNode.insertBefore(document.createTextNode(""), matrixElem);
+                }
+
+                selection.removeAllRanges();
+                let range = new Range();
+                range.setStart(matrixElem.previousSibling, matrixElem.previousSibling.textContent.length);
+                range.setEnd(matrixElem.previousSibling, matrixElem.previousSibling.textContent.length);
+                selection.addRange(range);
+                evt.preventDefault();
+            }
+        }
+    } else if (evt.code == "ArrowRight") {
+        let selection = window.getSelection();
+        if (evt.ctrlKey ||
+            (selection.focusNode == selection.anchorNode && selection.focusOffset == selection.focusNode.textContent.length && selection.focusOffset == selection.anchorOffset && selection.anchorNode.parentElement == cell) ||
+            (selection.focusNode == selection.anchorNode && selection.focusOffset == selection.anchorOffset && selection.focusNode == cell && selection.focusOffset == selection.focusNode.childNodes.length)    
+            ) {
+            if (cell.nextElementSibling != null) {
+                focusMatrixCell(cell.nextElementSibling);
+                evt.preventDefault();
+            } else {
+                if (matrixElem.nextSibling == null) {
+                    matrixElem.parentNode.append(document.createTextNode(" "));
+                    console.log("parent", matrixElem.parentNode);
+                }
+
+                selection.removeAllRanges();
+                let range = new Range();
+                range.setStart(matrixElem.nextSibling, 0);
+                range.setEnd(matrixElem.nextSibling, 0);
+                selection.addRange(range);
+                evt.preventDefault();
+            }
+        }
+    } else if (evt.code == "Backspace") {
+        if (evt.shiftKey) {
+            let curRow = cell.parentElement;
+            let idx = Array.from(curRow.cells).indexOf(cell);
+            for (let row of Array.from(matrixElem.rows)) {
+                row.cells[idx].remove();
+            }
+            evt.preventDefault();
+            if (curRow.cells.length == 0) {
+                matrixElem.remove();
+            } else {
+                focusMatrixCell(curRow.cells[idx-1 < 0 ? 0 : idx-1]);
+            }
+        } else if (evt.ctrlKey) {
+            let idx = Array.from(rowElem.cells).indexOf(cell);
+            let nextRow = rowElem.nextElementSibling != null ? rowElem.nextElementSibling : matrixElem.rows[0];
+            rowElem.remove();
+
+            evt.preventDefault();
+            if (matrixElem.rows.length != 0) {
+                focusMatrixCell(nextRow.cells[idx]);
+            } else {
+                matrixElem.remove();
+            }
+        }
     }
 }
 
@@ -237,15 +313,20 @@ const Line = {
         });
         inputElem.addEventListener("keydown", function(evt) {
             let selection = window.getSelection();
+//            console.log(selection.getRangeAt(0).endContainer);
             if (selection.rangeCount == 1 && 
                 (selection.getRangeAt(0).endContainer.parentElement.parentElement.classList.contains("matrix")
-                || selection.getRangeAt(0).endContainer.parentElement.parentElement.parentElement.classList.contains("matrix"))) {
+                || selection.getRangeAt(0).endContainer.parentElement.parentElement.parentElement.classList.contains("matrix")
+                || selection.getRangeAt(0).endContainer.parentElement.parentElement.parentElement.parentElement.classList.contains("matrix"))) {
 
                 let cell = selection.getRangeAt(0).endContainer.parentElement.tagName.toLowerCase() == "tr" ? 
                     selection.getRangeAt(0).endContainer : selection.getRangeAt(0).endContainer.parentElement;
                 console.assert(cell.tagName.toLowerCase() == "td", "cell tag is " + cell.tagName);
 
-                handleMatrixCellKeydown(evt, cell);
+                if (cell.tagName.toLowerCase() == "td") {
+                    handleMatrixCellKeydown(evt, cell);
+                    evaluateAll();
+                }
             } else {
                 let lineElem = document.activeElement.parentElement;
                 if (evt.code == "Enter") {
@@ -408,8 +489,8 @@ function evaluateAll() {
     }
 
     let values = Rust.eval(exprs);
-    console.log(exprs);
-    console.log(values);
+//    console.log(exprs);
+//    console.log(values);
     for (let i = 0; i < values.length; i++) {
         let line = lines[indexes[i]];
         if (values[i].error) {
@@ -446,6 +527,7 @@ function saveLines() {
     let html = lines.map(x => Line.input(x).innerHTML);
     localStorage.setItem("lines", JSON.stringify(html));
 }
+setTimeout(saveLines, 1000);
 
 function loadLines() {
     if (localStorage.getItem("lines")) {
