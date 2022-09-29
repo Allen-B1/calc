@@ -100,7 +100,7 @@ impl NumClass {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data")]
 #[serde(rename_all = "lowercase")]
 pub enum Value {
@@ -143,7 +143,7 @@ impl Value {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Matrix {
     pub entries: Vec<Complex64>,
     pub width: usize,
@@ -237,6 +237,7 @@ impl Matrix {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Expr {
     class: Class,
+    #[serde(flatten)]
     data: ExprData,
 }
 
@@ -264,7 +265,7 @@ impl Expr {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", content = "data_data")]
+#[serde(tag = "type", content = "data")]
 pub enum ExprData {
     Ident(String),
     Num(f64),

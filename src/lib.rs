@@ -3,7 +3,7 @@ use std::iter::Peekable;
 use serde_json::json;
 use wasm_bindgen::{prelude::*, JsCast};
 
-use crate::{eval::{SymbolTable, Value, SymbolExprTable}, ast::Node};
+use crate::{eval::{SymbolTable, Value, SymbolExprTable, eval_expr}, ast::Node};
 
 mod tokenizer;
 mod ast;
@@ -81,5 +81,46 @@ pub fn get_ident(expr: String) -> Option<String> {
     match node {
         Ok(Node::Assign(name, _, _)) => Some(name),
         _ => None
+    }
+}
+
+#[wasm_bindgen]
+pub fn eval_func(value: String, inputs: String) -> String {
+    fn inner(func: Value, inputs: Vec<Vec<Value>>) -> Result<Vec<Value>, String> {
+        let (params, expr) = match func {
+            Value::Func(params, expr) => (params, *expr.clone()),
+            _ => Err(format!("value is not a function"))?
+        };
+
+        let mut outputs = Vec::new();
+        for inputset in inputs {
+            if params.len() != inputset.len() {
+                Err(format!("expected {} arguments, got {} arguments", params.len(), inputset.len()))?
+            }
+    
+            let mut symbols = SymbolTable::new();
+            for (i, input) in inputset.into_iter().enumerate() {
+                symbols.insert(params[i].0.clone(), input);
+            }
+            outputs.push(eval_expr(&expr, &symbols)?);
+        }
+
+        Ok(outputs)
+    }
+
+    let vec = inner(
+        match serde_json::from_str(&value) {
+            Ok(e) => e,
+            Err(e) => return format!("{:?}", e)
+        },
+        match serde_json::from_str(&inputs) {
+            Ok(e) => e,
+            Err(e) => return format!("{:?}", e)
+        }
+    );
+
+    match vec {
+        Err(e) => format!("{}", e),
+        Ok(v) => serde_json::to_string(&v).unwrap_or_else(|e| e.to_string())
     }
 }
