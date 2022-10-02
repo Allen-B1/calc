@@ -1,4 +1,4 @@
-use std::iter::Peekable;
+use std::{iter::Peekable, collections::{HashMap, HashSet}};
 
 use serde_json::json;
 use wasm_bindgen::{prelude::*, JsCast};
@@ -16,7 +16,8 @@ pub fn eval(input: String) -> String {
     fn inner(input: Vec<String>) -> Vec<Result<Value, String>> {
         // execute assignments first
         // TODO: more advanced dependency graph
-        let mut assignments = Vec::new();
+        let mut assignments = HashMap::new();
+
         let mut exprs = Vec::new();
         let mut errors = Vec::new();
 
@@ -24,35 +25,73 @@ pub fn eval(input: String) -> String {
             let tokens: Result<Vec<_>, _> = tokenizer::Tokenizer::new(str).collect();
             let node = tokens.and_then(|tokens| ast::parser::parse(&tokens, &mut 0)); 
             match node {
-                Ok(node @ Node::Assign(_, _, _)) => assignments.push((idx, node)),
+                Ok(Node::Assign(ident, b, c)) => {assignments.insert(ident.clone(), (idx, Node::Assign(ident, b, c)));},
                 Ok(node) => exprs.push((idx, node)),
                 Err(err) => errors.push((idx, err))
             }
         }
 
-        let mut expr_table = SymbolExprTable::new();
-        let mut table = SymbolTable::new();
-        let mut values = vec![Err("".to_string()); input.len()];
-        for (idx, node) in assignments.iter() {
-            let expr = eval::create_expr(node, &mut expr_table, &mut |_, _|{});
-            let ident = match node {
-                Node::Assign(ident, _, _) => ident,
-                _ => unreachable!()
-            };
-            let value = expr.and_then(|expr| eval::eval_expr(&expr, &table));
-            if value.is_ok() {
-                table.insert(ident.clone(), value.clone().unwrap());
+        let mut ordering = Vec::new();
+
+        let mut mark_perm = HashSet::new();
+        let mut mark_temp = HashSet::new();
+
+        fn visit(ident:&str, node: &Node, assignments: &HashMap<String, (usize, Node)>, ordering: &mut Vec<String>, mark_perm: &mut HashSet<String>, mark_temp: &mut HashSet<String>) {
+            if mark_perm.contains(ident) {
+                return;
             }
-            values[*idx] = value;
+            if mark_temp.contains(ident) {
+                ordering.push(ident.to_owned());
+                return;
+            }
+
+            mark_temp.insert(ident.to_owned());
+
+            let mut idents = HashSet::new();
+            node.idents(&mut idents);
+            for dep in idents {
+                if assignments.contains_key(&dep) {
+                    visit(&dep, &assignments[&dep].1, assignments, ordering, mark_perm, mark_temp);
+                }
+            }
+
+            mark_temp.remove(ident);
+            mark_perm.insert(ident.to_owned());
+            ordering.push(ident.to_owned());
         }
-        for (idx, node) in exprs.iter() {
-            let expr = eval::create_expr(node, &mut expr_table, &mut |_, _|{});
-            values[*idx] = expr.and_then(|expr| eval::eval_expr(&expr, &mut table));
+
+        loop {
+            for (ident, (idx, node)) in assignments.iter() {
+                if !mark_temp.contains(ident) && !mark_perm.contains(ident) {
+                    visit(&ident, &node, &assignments, &mut ordering, &mut mark_perm, &mut mark_temp);
+                    break;
+                }
+            }
+
+            if mark_temp.len() + mark_perm.len() >= assignments.len() {
+                break
+            }
+        };
+
+        let mut exprtable = SymbolExprTable::new();
+        let mut symbols = SymbolTable::new();
+        let mut values = vec![None; input.len()];
+        for ident in ordering {
+            let idx =assignments[&ident].0;
+            let expr = eval::create_expr(&assignments[&ident].1, &mut exprtable, &mut |_, _| {});
+            let value = expr.and_then(|expr| eval::eval_expr(&expr, &symbols));
+            if let Ok(value) = &value {
+                symbols.insert(ident, value.clone());
+            }
+            values[idx] = Some(value);
         }
-        for (idx, err) in errors {
-            values[idx] = Err(err);
+        for (idx, node) in exprs {
+            let expr = eval::create_expr(&node, &mut exprtable, &mut |_, _| {});
+            let value = expr.and_then(|expr| eval::eval_expr(&expr, &symbols));
+            values[idx] = Some(value);
         }
-        values
+
+        values.into_iter().map(|x| x.unwrap_or(Err(format!("internal error 2042")))).collect()
     }
 
     let vec = inner(match serde_json::from_str(&input) {
@@ -100,7 +139,7 @@ pub fn eval_func(value: String, inputs: String) -> String {
     
             let mut symbols = SymbolTable::new();
             for (i, input) in inputset.into_iter().enumerate() {
-                symbols.insert(params[i].0.clone(), input);
+                symbols.insert(params[i].clone(), input);
             }
             outputs.push(eval_expr(&expr, &symbols)?);
         }

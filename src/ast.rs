@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 
 #[derive(Debug)]
 pub enum Node {
@@ -20,6 +22,43 @@ pub struct Matrix {
 impl Matrix {
     pub fn height(&self) -> usize {
         return self.entries.len() / self.width
+    }
+}
+
+impl Node {
+    pub fn idents(&self, idents: &mut HashSet<String>) {
+        match self {
+            Node::Matrix(matrix) => {
+                for node in matrix.entries.iter() {
+                    node.idents(idents);
+                }
+            },
+            Node::Num(_) => {},
+            Node::Ident(name) => {idents.insert(name.clone());},
+            Node::Assign(_, params, expr) => {
+                let mut ns = HashSet::new();
+                expr.idents(&mut ns);
+                for param in params {
+                    ns.remove(param);
+                }
+                for ident in ns {
+                    idents.insert(ident);
+                }
+            },
+            Node::BinaryOp(lhs, _, rhs) => {
+                lhs.idents(idents);
+                rhs.idents(idents);
+            },
+            Node::UnaryOp(_, inner) => {
+                inner.idents(idents);
+            }
+            Node::Call(lhs, rhs) => {
+                lhs.idents(idents);
+                for param in rhs {
+                    param.idents(idents);
+                }
+            }
+        }
     }
 }
 

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Display};
+use std::{collections::{HashMap, HashSet}, fmt::Display};
 use num::{Zero, complex::Complex64};
 use serde::{Serialize, Serializer, ser::{SerializeTuple, SerializeSeq}, Deserialize};
 
@@ -107,7 +107,7 @@ pub enum Value {
     Undefined,
     Num(Complex64),
     Matrix(Matrix),
-    Func(Vec<(String, Class)>, Box<Expr>)
+    Func(Vec<String>, Box<Expr>)
 }
 
 impl Value {
@@ -137,7 +137,7 @@ impl Value {
                 }
             },
             Value::Func(params, expr) => {
-                Class::Func(params.iter().map(|x| x.1.clone()).collect(), Box::new(expr.class.clone()))
+                Class::Func(vec![Class::Any; params.len()], Box::new(Class::Any))
             }
         }
     }
@@ -234,39 +234,32 @@ impl Matrix {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Expr {
-    class: Class,
-    #[serde(flatten)]
-    data: ExprData,
-}
-
 impl Expr {
-    pub fn new_add(class: Class, lhs: Expr, rhs: Expr) -> Expr {
-        Expr { class, data: ExprData::Add(Box::new(lhs), Box::new(rhs))}
+    pub fn new_add(lhs: Expr, rhs: Expr) -> Expr {
+        Expr::Add(Box::new(lhs), Box::new(rhs))
     }
-    pub fn new_mul(class: Class, lhs: Expr, rhs: Expr) -> Expr {
-        Expr { class, data: ExprData::Mul(Box::new(lhs), Box::new(rhs))}
+    pub fn new_mul(lhs: Expr, rhs: Expr) -> Expr {
+        Expr::Mul(Box::new(lhs), Box::new(rhs))
     }
-    pub fn new_sub(class: Class, scalar_class: NumClass, lhs: Expr, rhs: Expr) -> Expr {
-        Self::new_add(class.clone(), lhs, 
-            Self::new_mul(class, Expr { class: Class::Num(scalar_class), data: ExprData::Num(-1.0) }, rhs))
+    pub fn new_sub(lhs: Expr, rhs: Expr) -> Expr {
+        Self::new_add(lhs, 
+            Self::new_mul(Expr::Num(-1.0), rhs))
     }
-    pub fn new_div(class: Class, lhs: Expr, rhs: Expr) -> Expr {
-        Expr { class, data: ExprData::Div(Box::new(lhs), Box::new(rhs)) }
+    pub fn new_div(lhs: Expr, rhs: Expr) -> Expr {
+        Expr::Div(Box::new(lhs), Box::new(rhs))
     }
-    pub fn new_dot(class: Class, lhs: Expr, rhs: Expr) -> Expr {
-        Expr { class, data: ExprData::Dot(Box::new(lhs), Box::new(rhs)) }
+    pub fn new_dot(lhs: Expr, rhs: Expr) -> Expr {
+        Expr::Dot(Box::new(lhs), Box::new(rhs))
     }
 
     pub fn opaque(class: Class) -> Expr {
-        Expr { class, data: ExprData::Num(5346.0) }
+        Expr::Num(5346.0)
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data")]
-pub enum ExprData {
+pub enum Expr {
     Ident(String),
     Num(f64),
     Matrix {
@@ -286,10 +279,10 @@ pub type SymbolTable = HashMap<String, Value>;
 pub type Error = String;
 
 pub fn eval_expr(expr: &Expr, symbols: &SymbolTable) -> Result<Value, Error> {
-    Ok(match &expr.data {
-        ExprData::Ident(s) => symbols.get(s).ok_or(format!("variable {} is not defined", s))?.clone(),
-        ExprData::Num(n) => Value::Num(Complex64::new(*n, 0.0)),
-        ExprData::Call(lhs, params) => {
+    Ok(match &expr {
+        Expr::Ident(s) => symbols.get(s).ok_or(format!("variable {} is not defined", s))?.clone(),
+        Expr::Num(n) => Value::Num(Complex64::new(*n, 0.0)),
+        Expr::Call(lhs, params) => {
             let lhs = eval_expr(lhs, symbols)?;
             let (param_names, expr) = match lhs {
                 Value::Func(params, expr) => (params, expr),
@@ -298,11 +291,11 @@ pub fn eval_expr(expr: &Expr, symbols: &SymbolTable) -> Result<Value, Error> {
             
             let mut new_symbols = symbols.clone();
             for (i, param) in params.iter().enumerate() {
-                new_symbols.insert(param_names[i].0.clone(), eval_expr(param, symbols)?);
+                new_symbols.insert(param_names[i].clone(), eval_expr(param, symbols)?);
             }
             eval_expr(&expr, &new_symbols)?
         },
-        ExprData::Add(a, b) => {
+        Expr::Add(a, b) => {
             let lhs = eval_expr(a, symbols)?;
             let rhs = eval_expr(b, symbols)?;
             
@@ -318,13 +311,13 @@ pub fn eval_expr(expr: &Expr, symbols: &SymbolTable) -> Result<Value, Error> {
                         Err(format!("cannot add functions with {} and {} parameters", params1.len(), params2.len()))?
                     }
                     Value::Func(params1.clone(),
-                        Box::new(Expr::new_add(expr1.class.combine(&expr2.class, '+'), *expr1, *expr2))
+                        Box::new(Expr::new_add( *expr1, *expr2))
                     )
                 },
                 (lhs, rhs) => Err(format!("cannot add {} and {}", lhs.class(), rhs.class()))?
             }
         },
-        ExprData::Mul(a, b) => {
+        Expr::Mul(a, b) => {
             let lhs = eval_expr(a, symbols)?;
             let rhs = eval_expr(b, symbols)?;
 
@@ -347,13 +340,13 @@ pub fn eval_expr(expr: &Expr, symbols: &SymbolTable) -> Result<Value, Error> {
                         Err(format!("cannot multiply functions with {} and {} parameters", params1.len(), params2.len()))?
                     }
                     Value::Func(params1.clone(),
-                        Box::new(Expr::new_mul(expr1.class.combine(&expr2.class, '*'), *expr1, *expr2))
+                        Box::new(Expr::new_mul(*expr1, *expr2))
                     )
                 },
                 (lhs, rhs) => Err(format!("cannot multiply {} and {}", lhs.class(), rhs.class()))?
             }
         },
-        ExprData::Div(a, b) => {
+        Expr::Div(a, b) => {
             let lhs = eval_expr(a, symbols)?;
             let rhs = eval_expr(b, symbols)?;
 
@@ -375,7 +368,7 @@ pub fn eval_expr(expr: &Expr, symbols: &SymbolTable) -> Result<Value, Error> {
                 (lhs, rhs) => Err(format!("cannot divide {} and {}", lhs.class(), rhs.class()))?
             }
         },
-        ExprData::Dot(a, b) => {
+        Expr::Dot(a, b) => {
             let lhs = eval_expr(a, symbols)?;
             let rhs = eval_expr(b, symbols)?;
 
@@ -388,42 +381,31 @@ pub fn eval_expr(expr: &Expr, symbols: &SymbolTable) -> Result<Value, Error> {
                         Err(format!("cannot compose function with multivariable input"))?;
                     }
 
-                    Value::Func(params1.clone(), Box::new(Expr {
-                        class: expr2.class.clone(),
-                        data: ExprData::Call(
+                    Value::Func(params1.clone(), Box::new(Expr::Call(
                             // f
-                            Box::new(Expr{
-                                class: Class::Func(params2.iter().map(|x| x.1.clone()).collect(), Box::new(expr2.class.clone())),
-                                data: ExprData::Func(
-                                    params2.iter().map(|x| x.0.clone()).collect(),
-                                    expr2,
-                                )
-                            }),
+                            Box::new(Expr::Func(
+                                params2.iter().map(|x| x.clone()).collect(),
+                                expr2,
+                            )),
                             // input to f
-                            vec![Expr {
-                                class: expr1.class.clone(),
-                                data: ExprData::Call(
+                            vec![Expr::Call(
                                     // g
-                                    Box::new(Expr {
-                                        class: Class::Func(params1.iter().map(|x| x.1.clone()).collect(), Box::new(expr1.class.clone())),
-                                        data: ExprData::Func(
-                                            params1.iter().map(|x| x.0.clone()).collect(),
-                                            expr1,
-                                        )
-                                    }),
-                                    params1.iter()
-                                        .map(|(a, b)| (ExprData::Ident(a.clone()), b.clone()))
-                                        .map(|(a, b)| Expr {class: b, data: a})
-                                        .collect()
-                                )
-                            }]
+                                Box::new(Expr::Func(
+                                        params1.iter().map(|x| x.clone()).collect(),
+                                        expr1,
+                                    )
+                                ),
+                                params1.iter()
+                                    .map(|x| Expr::Ident(x.clone()))
+                                    .collect()
+                            )]
                         )
-                    }))
+                    ))
                 },
                 (lhs, rhs) => Err(format!("cannot dot {} and {}", lhs.class(), rhs.class()))?
             }
         },
-        ExprData::Matrix { entries, width, augmented } => {
+        Expr::Matrix { entries, width, augmented } => {
             let entries: Vec<Complex64> = entries.iter().map(|entry| match eval_expr(entry, symbols)? {
                 Value::Num(n) => Ok(n),
                 value => Err(format!("matrix cannot contain non-number entries: {}", value.class()))
@@ -433,13 +415,8 @@ pub fn eval_expr(expr: &Expr, symbols: &SymbolTable) -> Result<Value, Error> {
                 width: *width, augmented: *augmented
             })
         },
-        ExprData::Func(params, output) => {
-            let param_classes = match &expr.class {
-                Class::Func(params, _) => params,
-                _ => unreachable!()
-            };
-
-            Value::Func(params.iter().map(Clone::clone).zip(param_classes.iter().map(Clone::clone)).collect(), output.clone())
+        Expr::Func(params, output) => {
+            Value::Func(params.clone(), output.clone())
         }
     })
 }
@@ -462,18 +439,12 @@ pub fn create_expr(node: &Node, symbols: &mut SymbolExprTable, undefined_variabl
                 }
 
                 let inner_expr = create_expr(rhs, &mut func_symbols, undefined_variable)?;
-                Expr {
-                    class: Class::Func(param_classes, Box::new(inner_expr.class.clone())),
-                    data: ExprData::Func(params.clone(), Box::new(inner_expr))
-                }
+                Expr::Func(params.clone(), Box::new(inner_expr))
             } else if ident.eq("y") && !symbols.contains_key("x") {
                 let mut func_symbols = symbols.clone();
                 func_symbols.insert("x".to_string(), Expr::opaque(Class::Num(NumClass::Real)));
                 let inner_expr = create_expr(rhs, &mut func_symbols, undefined_variable)?;
-                Expr {
-                    class: Class::Func(vec![Class::Num(NumClass::Real)], Box::new(inner_expr.class.clone())),
-                    data: ExprData::Func(params.clone(), Box::new(inner_expr))
-                }
+                Expr::Func(vec!["x".to_owned()], Box::new(inner_expr))
             } else {
                 create_expr(rhs, symbols, undefined_variable)?
             };
@@ -485,22 +456,20 @@ pub fn create_expr(node: &Node, symbols: &mut SymbolExprTable, undefined_variabl
             let lhs = create_expr(lhs, symbols, undefined_variable)?;
             let rhs = create_expr(rhs, symbols, undefined_variable)?;
 
-            let class = lhs.class.combine(&rhs.class, *op);
             match op {
-                '+' => Expr::new_add(class, lhs, rhs),
-                '-' => Expr::new_sub(class, NumClass::Int, lhs, rhs),
-                '*' => Expr::new_mul(class,lhs, rhs),
-                '/' => Expr::new_div(class,lhs, rhs),
-                '.' => Expr::new_dot(class,lhs, rhs),
+                '+' => Expr::new_add(lhs, rhs),
+                '-' => Expr::new_sub(lhs, rhs),
+                '*' => Expr::new_mul(lhs, rhs),
+                '/' => Expr::new_div(lhs, rhs),
+                '.' => Expr::new_dot(lhs, rhs),
                 _ => Err(format!("unknown operation: {}", op))?
             }
         },
         Node::UnaryOp(op, inner) => {
             let inner = create_expr(inner, symbols, undefined_variable)?;
-            let class = inner.class.clone();
             match  op {
-                '+' => Expr::new_mul(class, Expr { class: Class::Num(NumClass::Int), data: ExprData::Num(1.0) }, inner),
-                '-' => Expr::new_mul(class, Expr { class: Class::Num(NumClass::Int), data: ExprData::Num(-1.0) }, inner),
+                '+' => Expr::new_mul(Expr::Num(1.0), inner),
+                '-' => Expr::new_mul(Expr::Num(-1.0), inner),
                 _ => Err(format!("unknown unary operation: {}", *op))?,
             }
         }
@@ -509,51 +478,26 @@ pub fn create_expr(node: &Node, symbols: &mut SymbolExprTable, undefined_variabl
             if expr.is_none() {
                 undefined_variable(ident.as_str(), symbols);
             }
-            let expr = symbols.get(ident).ok_or(format!("variable {} not defined", ident))?;
-            Expr { class: expr.class.clone(), data: ExprData::Ident(ident.clone()) }
+            Expr::Ident(ident.clone())
         }
         Node::Matrix(mdata) => {
             let entries: Vec<Expr> = mdata.entries.iter().map(|node| create_expr(node, symbols, undefined_variable)).collect::<Result<_, _>>()?;
-            let class = entries.iter().fold(Some(NumClass::Int), |class, entry| match (class, &entry.class) {
-                (Some(nc1), Class::Num(nc2)) => Some(nc1.combine(*nc2)),
-                _ => None
-            });
-            Expr { class: class.map(Class::Num).unwrap_or(Class::Any), data: ExprData::Matrix {
+            Expr::Matrix {
                 entries,
                 width: mdata.width,
                 augmented: mdata.augmented
-            } } 
+            }
         },
         Node::Num(n) => {
-            let class = if *n as i64 as f64 == *n {
-                Class::Num(NumClass::Int)
-            } else {
-                Class::Num(NumClass::Real)
-            };
-
-            Expr { class, data: ExprData::Num(*n) }
+            Expr::Num(*n)
         },
         Node::Call(lhs, params) => {
             let lhs = create_expr(lhs, symbols, undefined_variable)?;
-            let ret = match &lhs.class {
-                Class::Func(_, output) => Some(&*output as &Class),
-                _ => None
-            };
-            if params.len() != 1 ||  ret.is_some() {
-                let mut param_exprs = Vec::new();
-                for param in params {
-                    param_exprs.push(create_expr(param, symbols, undefined_variable)?);
-                }
-                Expr {
-                    class: ret.map(Clone::clone).unwrap_or(Class::Any),
-                    data: ExprData::Call(Box::new(lhs), param_exprs)
-                }
-            } else {
-                let rhs = &params[0];
-                let rhs = create_expr(rhs, symbols, undefined_variable)?;
-                let class = lhs.class.combine(&rhs.class, '*');
-                Expr::new_mul(class, lhs, rhs)
+            let mut param_exprs = Vec::new();
+            for param in params {
+                param_exprs.push(create_expr(param, symbols, undefined_variable)?);
             }
+            Expr::Call(Box::new(lhs), param_exprs)
         }
     })
 }
