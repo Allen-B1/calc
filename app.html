@@ -3,6 +3,7 @@
     <head>
         <script src="pkg/calculator_2.js"></script>
         <script src="graph.js"></script>
+        <meta charset="utf-8">
         <script>
 wasm_bindgen("pkg/calculator_2_bg.wasm");
 
@@ -451,7 +452,7 @@ const Line = {
         } else {
             textElem.classList.remove("error");
         }
-        textElem.textContent = text;
+        textElem.innerHTML = text;
     },
 };
 
@@ -545,8 +546,6 @@ function evaluateAll(debug) {
             }
             break;
         case "func":
-            Line.showText(line, "Function");
-
             // evaluate coordinates
             let t = [];
             for (let i = 0; i <= 256; i++) {
@@ -557,6 +556,7 @@ function evaluateAll(debug) {
             // if there is an error break
             if (coords.error) {
                 console.error(coords.error);
+                Line.showText(line, "U<sup>" + value.data[0].length + "</sup> → U");
                 break;
             }
 
@@ -564,32 +564,43 @@ function evaluateAll(debug) {
 
             // add coordinates to graph if applicable & break
             let points = [];
+            let hasReals = false;
             for (let coord of coords) {
                 if (coord.type == "matrix" && coord.data.width == 1 && coord.data.entries.length == 2 &&
                     coord.data.entries[0][1] == 0 && coord.data.entries[1][1] == 0
                     ) {
                     points.push([coord.data.entries[0][0], coord.data.entries[1][0]]);
+                } else if (coord.type == "num" && coord.data[1] == 0) {
+                    hasReals = true;
                 }
             }
             if (points.length != 0) {
                 graph.addCurve(points, curveColor);
+                Line.showText(line, "R → R<sup>2</sup>");
                 break;
             }
 
             // real
-            graph.addLine(arr => {
-                let inputs = arr.map(x => ([{type: "num", data: [x, 0]}]));
-                console.log(value);
-                console.log(inputs);
-                let output = Rust.evalFunc(value, inputs);
-                output = output.map(out => {
-                    if (out.type == "num") {
-                        return out.data[0];
-                    }
-                    return null;
-                });
-                return output;
-            }, curveColor);
+            if (hasReals) {
+                graph.addLine(arr => {
+                    let inputs = arr.map(x => ([{type: "num", data: [x, 0]}]));
+                    console.log(value);
+                    console.log(inputs);
+                    let output = Rust.evalFunc(value, inputs);
+                    output = output.map(out => {
+                        if (out.type == "num") {
+                            return out.data[0];
+                        }
+                        return null;
+                    });
+                    return output;
+                }, curveColor);
+                Line.showText(line, "R → R");
+                break;
+            }
+
+            // other
+            Line.showText(line, "U → U");
         }
     }
     graph.draw();
