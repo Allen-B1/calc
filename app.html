@@ -24,7 +24,7 @@ const Rust = {
         try {
             return JSON.parse(out);
         } catch(err) {
-            throw out;
+            return {error: out};
         }
     }
 };        </script>
@@ -154,6 +154,7 @@ main {
         </main>
 
         <script>
+/// <reference path="graph.js" />
 let graph = new Graph(document.getElementById("canvas-container"));
 
 const Matrix = {
@@ -545,6 +546,37 @@ function evaluateAll(debug) {
             break;
         case "func":
             Line.showText(line, "Function");
+
+            // evaluate coordinates
+            let t = [];
+            for (let i = 0; i <= 256; i++) {
+                t.push([{type: "num", data: [i/256, 0]}]);
+            }
+            let coords = Rust.evalFunc(value, t);
+
+            // if there is an error break
+            if (coords.error) {
+                console.error(coords.error);
+                break;
+            }
+
+            let curveColor = ["red", "green", "blue", "orange", "violet"][i % 5];
+
+            // add coordinates to graph if applicable & break
+            let points = [];
+            for (let coord of coords) {
+                if (coord.type == "matrix" && coord.data.width == 1 && coord.data.entries.length == 2 &&
+                    coord.data.entries[0][1] == 0 && coord.data.entries[1][1] == 0
+                    ) {
+                    points.push([coord.data.entries[0][0], coord.data.entries[1][0]]);
+                }
+            }
+            if (points.length != 0) {
+                graph.addCurve(points, curveColor);
+                break;
+            }
+
+            // real
             graph.addLine(arr => {
                 let inputs = arr.map(x => ([{type: "num", data: [x, 0]}]));
                 console.log(value);
@@ -554,9 +586,10 @@ function evaluateAll(debug) {
                     if (out.type == "num") {
                         return out.data[0];
                     }
+                    return null;
                 });
                 return output;
-            }, ["red", "green", "blue", "orange", "violet"][i % 5]);
+            }, curveColor);
         }
     }
     graph.draw();

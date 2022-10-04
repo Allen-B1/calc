@@ -255,6 +255,31 @@ impl Expr {
     pub fn opaque(class: Class) -> Expr {
         Expr::Num(5346.0)
     }
+
+    pub fn from_num(n: Complex64) -> Expr {
+        if n.im == 0.0 {
+            Expr::Num(n.re)
+        } else {
+            Expr::new_add(Expr::Num(n.re), Expr::new_mul(Expr::Num(n.im), Expr::Ident("i".to_owned())))
+        }
+    }
+}
+
+impl From<Value> for Expr {
+    fn from(v: Value) -> Self {
+        match v {
+            Value::Undefined => Expr::Ident("undefined".to_owned()),
+            Value::Num(n) => Expr::from_num(n),
+            Value::Matrix(matrix) => {
+                Expr::Matrix {
+                    entries: matrix.entries.into_iter().map(Expr::from_num).collect(),
+                    width: matrix.width,
+                    augmented: matrix.augmented
+                }
+            },
+            Value::Func(params, expr) => Expr::Func(params, expr)
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -416,9 +441,41 @@ pub fn eval_expr(expr: &Expr, symbols: &SymbolTable) -> Result<Value, Error> {
             })
         },
         Expr::Func(params, output) => {
-            Value::Func(params.clone(), output.clone())
+            Value::Func(params.clone(), Box::new(substitute_idents(&*output, symbols, params)))
         }
     })
+}
+
+fn substitute_idents(expr: &Expr, symbols: &SymbolTable, params: &[String]) -> Expr {
+    match expr {
+        Expr::Ident(s) => {
+            if symbols.contains_key(s) && !params.contains(s) {
+                symbols[s].clone().into()
+            } else {
+                Expr::Ident(s.clone())
+            }
+        },
+        Expr::Add(lhs, rhs) => Expr::Add(Box::new(substitute_idents(lhs, symbols, params)), Box::new(substitute_idents(rhs, symbols, params))),
+        Expr::Mul(lhs, rhs) => Expr::Mul(Box::new(substitute_idents(lhs, symbols, params)), Box::new(substitute_idents(rhs, symbols, params))),
+        Expr::Div(lhs, rhs) => Expr::Div(Box::new(substitute_idents(lhs, symbols, params)), Box::new(substitute_idents(rhs, symbols, params))),
+        Expr::Dot(lhs, rhs) => Expr::Dot(Box::new(substitute_idents(lhs, symbols, params)), Box::new(substitute_idents(rhs, symbols, params))),
+        Expr::Num(n) => Expr::Num(*n),
+        Expr::Func(params2, expr) => {
+            let mut params = params.to_owned(); params.append(&mut params2.to_owned());
+            Expr::Func(params2.clone(), 
+                Box::new(substitute_idents(expr, symbols, &mut params)))
+        },
+        Expr::Matrix { entries, width, augmented} => {
+            let mut new_entries = Vec::new();
+            for entry in entries {
+                new_entries.push(substitute_idents(entry, symbols, params));
+            }
+            Expr::Matrix { entries: new_entries, width: *width, augmented: *augmented }
+        }
+        Expr::Call(func, params2) => {
+            Expr::Call(Box::new(substitute_idents(func, symbols, params)), params2.clone())
+        }
+    }
 }
 
 pub type SymbolExprTable = HashMap<String, Expr>;
