@@ -14,7 +14,10 @@ This project is very much incomplete.
 
 ![Screenshot](screenshot.png)
 
-## Setup
-1. Clone this repo
-2. `cargo build`
-3. `python3 -m http.server`
+## Getting Started
+```bash
+git clone https://github.com/allen-B1/calc.git && cd calc
+cargo build
+python3 -m http.server
+```
+Then open up `localhost:8000/app.html` (or whatever port Python outputs) in your web browser.
