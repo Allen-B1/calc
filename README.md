@@ -6,6 +6,9 @@ Currently supported objects:
 * Matrices
 * Functions
    * Functions `R -> R` and `[0, 1] -> R^2` can be graphed.
+Planned:
+* Vector/scalar fields
+* Arithemetic on fields with nonzero characteristic
 
 This project is very much incomplete.
 
