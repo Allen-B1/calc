@@ -8,6 +8,7 @@ use crate::{eval::{SymbolTable, Value, SymbolExprTable, eval_expr}, ast::Node};
 mod tokenizer;
 mod ast;
 mod eval;
+mod value;
 
 /// Evaluates a JSON-encoded array of expressions,
 /// and returns an array of values or errors.
